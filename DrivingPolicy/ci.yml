@@ -1,0 +1,119 @@
+ˀstages:
+  - build
+  - publish
+  - package
+  - deploy
+
+# Default: run on your preprovisioned shell runner
+default:
+  tags:
+    - restricted-runner
+  before_script:
+    # fail-fast and make scripts robust
+    - set -euo pipefail
+    - echo "Runner environment:"
+    - dotnet --version || true
+    - az --version || true
+    - zip -v || true
+
+variables:
+  DOTNET_CONFIGURATION: "Release"
+  PUBLISH_DIR: "publish"
+  ZIP_NAME: "app_publish.zip"
+  # set this to the csproj you want to publish relative to repo root
+  DOTNET_PROJECT_PATH: "src/YourWebProject/YourWebProject.csproj"
+
+# Build (restore + build)
+build:
+  stage: build
+  script:
+    - echo "Restoring packages"
+    - dotnet restore "$DOTNET_PROJECT_PATH"
+    - echo "Building project"
+    - dotnet build "$DOTNET_PROJECT_PATH" --configuration "$DOTNET_CONFIGURATION" --no-restore
+  artifacts:
+    expire_in: 1h
+    paths:
+      - .nuget/packages # optional if you pre-seed packages
+
+# Publish (produce files for deployment)
+publish:
+  stage: publish
+  needs: ["build"]
+  script:
+    - echo "Publishing project to $PUBLISH_DIR"
+    - dotnet publish "$DOTNET_PROJECT_PATH" -c "$DOTNET_CONFIGURATION" -o "$PUBLISH_DIR"
+  artifacts:
+    paths:
+      - $PUBLISH_DIR
+    expire_in: 1h
+
+# Package (zip published output)
+package:
+  stage: package
+  needs: ["publish"]
+  script:
+    - echo "Packaging $PUBLISH_DIR into $ZIP_NAME"
+    - cd "$PUBLISH_DIR"
+    - zip -r ../"$ZIP_NAME" .
+    - cd ..
+    - ls -la "$ZIP_NAME"
+  artifacts:
+    paths:
+      - $ZIP_NAME
+    expire_in: 1h
+
+# Deploy to DEV (manual)
+deploy_dev:
+  stage: deploy
+  needs: ["package"]
+  environment:
+    name: dev
+    url: $APP_URL_DEV
+  script:
+    - echo "Logging into Azure using service principal"
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - echo "Deploying $ZIP_NAME to $AZURE_WEBAPP_NAME_DEV (resource group: $AZURE_RESOURCE_GROUP)"
+    - az webapp deployment source config-zip --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME_DEV" --src "$ZIP_NAME"
+  when: manual
+  only:
+    - main
+  dependencies:
+    - package
+
+# Deploy to STAGE (manual, protected recommended)
+deploy_stage:
+  stage: deploy
+  needs: ["package"]
+  environment:
+    name: stage
+    url: $APP_URL_STAGE
+  script:
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - az webapp deployment source config-zip --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME_STAGE" --src "$ZIP_NAME"
+  when: manual
+  only:
+    - main
+  dependencies:
+    - package
+  # Protect this job in GitLab UI (only allow Maintainers to run)
+
+# Deploy to PROD (manual, protected branch + protected variables strongly recommended)
+deploy_prod:
+  stage: deploy
+  needs: ["package"]
+  environment:
+    name: production
+    url: $APP_URL_PROD
+  script:
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - az webapp deployment source config-zip --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME_PROD" --src "$ZIP_NAME"
+  when: manual
+  only:
+    - main
+  dependencies:
+    - package
+  # Mark this job as protected in GitLab so only protected branches/users can run it
