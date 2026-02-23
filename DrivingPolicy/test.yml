@@ -1,0 +1,46 @@
+stages:
+  - validate
+
+default:
+  tags:
+    - restricted-runner
+
+validate_azure_connectivity:
+  stage: validate
+  script:
+    - set -euo pipefail
+    - echo "Checking required tools ===="
+    - command -v dotnet || (echo "dotnet not installed" && exit 1)
+    - command -v az || (echo "Azure CLI not installed" && exit 1)
+    - command -v zip || (echo "zip not installed" && exit 1)
+
+    - echo "dotnet version:"
+    - dotnet --version
+    - echo "Azure CLI version:"
+    - az --version | head -n 1
+
+    - echo "==== STEP 2 Logging into Azure ===="
+    - az login --service-principal \
+        -u "$AZURE_CLIENT_ID" \
+        -p "$AZURE_CLIENT_SECRET" \
+        --tenant "$AZURE_TENANT_ID"
+
+    - echo "==== STEP 3: Setting subscription ===="
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+
+    - echo "==== STEP 4: Verifying subscription access ===="
+    - az account show --output table
+
+    - echo "==== STEP 5: Checking resource group ===="
+    - az group show --name "$AZURE_RESOURCE_GROUP" --output table
+
+    - echo "==== STEP 6: Checking web app existence ===="
+    - az webapp show \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --name "$AZURE_WEBAPP_NAME_DEV" \
+        --output table
+
+    - echo "==== STEP 7: Checking deployment endpoint reachability ===="
+    - curl -I "https://$AZURE_WEBAPP_NAME_DEV.azurewebsites.net" || true
+
+    - echo "==== VALIDATION SUCCESSFUL ===="
