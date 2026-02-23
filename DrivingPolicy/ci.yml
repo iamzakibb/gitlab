@@ -1,4 +1,4 @@
-ˀstages:
+stages:
   - build
   - publish
   - package
@@ -82,7 +82,7 @@ deploy_dev:
   dependencies:
     - package
 
-# Deploy to STAGE (manual, protected recommended)
+
 deploy_stage:
   stage: deploy
   needs: ["package"]
@@ -99,8 +99,6 @@ deploy_stage:
   dependencies:
     - package
   # Protect this job in GitLab UI (only allow Maintainers to run)
-
-# Deploy to PROD (manual, protected branch + protected variables strongly recommended)
 deploy_prod:
   stage: deploy
   needs: ["package"]
@@ -116,4 +114,4 @@ deploy_prod:
     - main
   dependencies:
     - package
-  # Mark this job as protected in GitLab so only protected branches/users can run it
+  
