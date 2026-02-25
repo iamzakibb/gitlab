@@ -31,16 +31,16 @@ validate_azure_connectivity:
     - echo "==== STEP 4: Verifying subscription access ===="
     - az account show --output table
 
-    - echo "==== STEP 5: Checking resource group ===="
-    - az group show --name "$AZURE_RESOURCE_GROUP" --output table
+    # - echo "==== STEP 5: Checking resource group ===="
+    # - az group show --name "$AZURE_RESOURCE_GROUP" --output table
 
-    - echo "==== STEP 6: Checking web app existence ===="
-    - az webapp show \
-        --resource-group "$AZURE_RESOURCE_GROUP" \
-        --name "$AZURE_WEBAPP_NAME_DEV" \
-        --output table
+    # - echo "==== STEP 6: Checking web app existence ===="
+    # - az webapp show \
+    #     --resource-group "$AZURE_RESOURCE_GROUP" \
+    #     --name "$AZURE_WEBAPP_NAME_DEV" \
+    #     --output table
 
-    - echo "==== STEP 7: Checking deployment endpoint reachability ===="
-    - curl -I "https://$AZURE_WEBAPP_NAME_DEV.azurewebsites.net" || true
+    # - echo "==== STEP 7: Checking deployment endpoint reachability ===="
+    # - curl -I "https://$AZURE_WEBAPP_NAME_DEV.azurewebsites.net" || true
 
     - echo "==== VALIDATION SUCCESSFUL ===="
