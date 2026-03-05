@@ -1,11 +1,33 @@
 stages:
   - validate
+  - test-azure
 
-validate_azure_connectivity:
+default:
+  image: "codebank-nexus.cloud.frb.org/cicd-executor-ubi:10"
+  tags:
+    - linux
+    - docker
+
+validate_environment:
   stage: validate
-  image: mcr.microsoft.com/azure-cli:latest
   script:
-    - set -eux
-    - az login --service-principal --username "$AZURE_CLIENT_ID" --password "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+    - echo "Runner ID $CI_RUNNER_ID"
+    - echo "Runner Tags $CI_RUNNER_TAGS"
+    - echo "Checking PowerShell"
+    - pwsh -v || echo "pwsh not installed"
+    - echo "Checking Azure CLI"
+    - az --version || echo "az cli not installed"
+    - echo "Checking dotnet"
+    - dotnet --version || echo "dotnet not installed"
+
+test_azure_connection:
+  stage: test-azure
+  script:
+    - echo "Logging into Azure"
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+    - echo "Setting subscription"
     - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - echo "Showing account"
     - az account show --output table
+    - echo "Checking resource group"
+    - az group show --name "$AZURE_RESOURCE_GROUP"
