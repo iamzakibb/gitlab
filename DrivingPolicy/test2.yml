@@ -1,0 +1,24 @@
+stages:
+  - diagnose
+
+default:
+  tags:
+    - linux
+    - docker
+
+diagnose_environment:
+  stage: diagnose
+  script:
+    - echo "===== RUNNER INFO ====="
+    - echo "Runner Description: $CI_RUNNER_DESCRIPTION"
+    - echo "Runner ID: $CI_RUNNER_ID"
+    - echo "Runner Tags: $CI_RUNNER_TAGS"
+    - echo "===== DNS TEST ====="
+    - nslookup codebank-nexus.cloud.frb.org || echo "DNS lookup failed"
+    - echo "===== NETWORK TEST ====="
+    - curl -I https://codebank-nexus.cloud.frb.org || echo "Registry not reachable"
+    - echo "===== TOOL CHECK ====="
+    - az --version || echo "Azure CLI not installed"
+    - pwsh -v || echo "PowerShell not installed"
+    - dotnet --version || echo "Dotnet not installed"
+    - echo "===== DONE ====="
