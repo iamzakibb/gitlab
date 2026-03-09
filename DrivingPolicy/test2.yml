@@ -2,11 +2,10 @@ stages:
   - debug
 
 variables:
-  HTTP_PROXY: "https://p1proxy6.frb.org.8080"
-  HTTPS_PROXY: "https://p1proxy6.frb.org.8080"
-  NO_PROXY: "localhost,127.0.0.1"
+  GIT_STRATEGY: none
 
 default:
+  image: "codebank-nexus.cloud.frb.org/cicd-executor-ubi:19"
   tags:
     - linux
     - docker
@@ -14,8 +13,7 @@ default:
 debug:
   stage: debug
   script:
-    - echo "Proxy variables"
+    - echo "Runner=$CI_RUNNER_DESCRIPTION"
+    - echo "Server=$CI_SERVER_HOST"
     - env | grep -i proxy
-    - curl -I https://$CI_SERVER_HOST || echo "curl failed"
-    - echo "Testing Nexus connectivity"
-    - curl -I https://codebank-nexus.cloud.frb.org || echo "curl nexus failed"
+    - curl -I https://$CI_SERVER_HOST
