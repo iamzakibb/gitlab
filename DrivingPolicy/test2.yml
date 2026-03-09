@@ -10,9 +10,9 @@ diagnose_environment:
   stage: diagnose
   script:
     - echo "===== RUNNER INFO ====="
-    - echo "Runner Description: $CI_RUNNER_DESCRIPTION"
-    - echo "Runner ID: $CI_RUNNER_ID"
-    - echo "Runner Tags: $CI_RUNNER_TAGS"
+    - echo "Runner Description $CI_RUNNER_DESCRIPTION"
+    - echo "Runner ID $CI_RUNNER_ID"
+    - echo "Runner Tags $CI_RUNNER_TAGS"
     - echo "===== DNS TEST ====="
     - nslookup codebank-nexus.cloud.frb.org || echo "DNS lookup failed"
     - echo "===== NETWORK TEST ====="
