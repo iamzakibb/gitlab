@@ -16,4 +16,6 @@ debug:
   script:
     - echo "Proxy variables"
     - env | grep -i proxy
-    - curl -I https://$CI_SERVER_HOST
+    - curl -I https://$CI_SERVER_HOST || echo "curl failed"
+    - echo "Testing Nexus connectivity"
+    - curl -I https://codebank-nexus.cloud.frb.org || echo "curl nexus failed"
