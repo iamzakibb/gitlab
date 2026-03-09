@@ -9,16 +9,23 @@ default:
 diagnose_environment:
   stage: diagnose
   script:
-    - echo "===== RUNNER INFO ====="
-    - echo "Runner Description $CI_RUNNER_DESCRIPTION"
-    - echo "Runner ID $CI_RUNNER_ID"
-    - echo "Runner Tags $CI_RUNNER_TAGS"
-    - echo "===== DNS TEST ====="
-    - nslookup codebank-nexus.cloud.frb.org || echo "DNS lookup failed"
-    - echo "===== NETWORK TEST ====="
-    - curl -I https://codebank-nexus.cloud.frb.org || echo "Registry not reachable"
-    - echo "===== TOOL CHECK ====="
-    - az --version || echo "Azure CLI not installed"
-    - pwsh -v || echo "PowerShell not installed"
-    - dotnet --version || echo "Dotnet not installed"
-    - echo "===== DONE ====="
+    - export http_proxy=$HTTP_PROXY
+    - export https_proxy=$HTTPS_PROXY
+    - git config --global http.proxy $HTTP_PROXY
+    - git config --global https.proxy $HTTPS_PROXY
+    - echo "Proxy configured"
+    - curl -I https://gitlab.prod.nit-cicd.awscfs.frb.pvt || echo "GitLab unreachable"
+    - curl -I https://codebank-nexus.cloud.frb.org || echo "Nexus unreachable"
+    # - echo "===== RUNNER INFO ====="
+    # - echo "Runner Description $CI_RUNNER_DESCRIPTION"
+    # - echo "Runner ID $CI_RUNNER_ID"
+    # - echo "Runner Tags $CI_RUNNER_TAGS"
+    # - echo "===== DNS TEST ====="
+    # - nslookup codebank-nexus.cloud.frb.org || echo "DNS lookup failed"
+    # - echo "===== NETWORK TEST ====="
+    # - curl -I https://codebank-nexus.cloud.frb.org || echo "Registry not reachable"
+    # - echo "===== TOOL CHECK ====="
+    # - az --version || echo "Azure CLI not installed"
+    # - pwsh -v || echo "PowerShell not installed"
+    # - dotnet --version || echo "Dotnet not installed"
+    # - echo "===== DONE ====="
