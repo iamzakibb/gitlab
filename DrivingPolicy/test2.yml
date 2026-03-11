@@ -19,3 +19,4 @@ debug:
     - which az || echo "az cli not found"
     - echo "Checking dotnet"
     - which dotnet || echo "dotnet not found"
+    - az --version || true
