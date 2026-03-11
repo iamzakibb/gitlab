@@ -7,7 +7,7 @@ variables:
 default:
   tags:
     - docker
-  image: "codebank-nexus.cloud.frb.org/cicd-executor-ps-az:2"
+  image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
 
 debug:
   stage: debug
