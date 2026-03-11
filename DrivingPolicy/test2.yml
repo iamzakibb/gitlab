@@ -5,14 +5,20 @@ variables:
   GIT_STRATEGY: none
 
 default:
-  image: "codebank-nexus.cloud.frb.org/cicd-executor-ubi:19"
   tags:
-    - linux
     - docker
+  image: "codebank-nexus.cloud.frb.org/cicd-executor-ps-az:2.0.7-1"
 
 debug:
   stage: debug
   script:
+    - echo "Checking PWSH exist version"
+    - which pwsh || echo "pwsh not found"
+    - pwsh -v || echo "pwsh not installed"
+    - echo "Checking Azure CLI"
+    - which az || echo "az cli not found"
+    - echo "Checking dotnet"
+    - which dotnet || echo "dotnet not found"
     - echo "Runner=$CI_RUNNER_DESCRIPTION"
     - echo "Server=$CI_SERVER_HOST"
     - env | grep -i proxy
