@@ -19,7 +19,3 @@ debug:
     - which az || echo "az cli not found"
     - echo "Checking dotnet"
     - which dotnet || echo "dotnet not found"
-    - echo "Runner=$CI_RUNNER_DESCRIPTION"
-    - echo "Server=$CI_SERVER_HOST"
-    - env | grep -i proxy
-    - curl -I https://$CI_SERVER_HOST
