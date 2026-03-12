@@ -17,6 +17,7 @@ debug:
     - pwsh -v || echo "pwsh not installed"
     - echo "Checking Azure CLI"
     - which az || echo "az cli not found"
+    - echo "Attempting to install .NET SDK if missing"; if command -v dotnet >/dev/null 2>&1; then echo ".NET already installed"; else if command -v apt-get >/dev/null 2>&1; then echo "Detected apt-get; installing dotnet via Microsoft repo"; curl -fsSL https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -o /tmp/packages-microsoft-prod.deb && dpkg -i /tmp/packages-microsoft-prod.deb && apt-get update -y && apt-get install -y dotnet-sdk-8.0 || echo "apt install failed"; elif command -v yum >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1; then echo "Detected yum/dnf; installing dotnet via Microsoft rpm repo"; curl -fsSL https://packages.microsoft.com/config/centos/7/packages-microsoft-prod.rpm -o /tmp/packages-microsoft-prod.rpm && rpm -Uvh /tmp/packages-microsoft-prod.rpm && (yum -y install dotnet-sdk-8.0 || dnf -y install dotnet-sdk-8.0) || echo "yum/dnf install failed"; else echo "No supported package manager to install dotnet"; fi; fi
     - echo "Checking dotnet"
     - which dotnet || echo "dotnet not found"
     - az --version || true
