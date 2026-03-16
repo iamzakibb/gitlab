@@ -1,8 +1,22 @@
 stages:
+  - fetch
   - build
   - publish
   - package
   - deploy
+
+# Use default/shared runner to clone the repo
+checkout_repo:
+  stage: fetch
+  script:
+    - echo "Runner used for checkout: $CI_RUNNER_DESCRIPTION"
+    - ls -la
+    - test -d .git || (echo ".git directory not found"; exit 1)
+  artifacts:
+    name: repo-${CI_COMMIT_SHORT_SHA}
+    paths:
+      - .
+    expire_in: 1h
 
 default:
   tags:
@@ -16,14 +30,8 @@ default:
       if ! command -v dotnet >/dev/null 2>&1; then
         curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
         chmod +x dotnet-install.sh
-        ./dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet
-        export PATH=$PATH:$HOME/.dotnet || (
-          echo "Fallback installing dotnet via tarball"
-          curl -L https://dotnetcli.azureedge.net/dotnet/Sdk/8.0.100/dotnet-sdk-8.0.100-linux-x64.tar.gz -o dotnet.tar.gz
-          mkdir -p $HOME/.dotnet
-          tar -zxf dotnet.tar.gz -C $HOME/.dotnet
-          export PATH=$PATH:$HOME/.dotnet
-        )
+        ./dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet || (echo "install script failed, trying tarball fallback" && curl -L https://dotnetcli.azureedge.net/dotnet/Sdk/8.0.100/dotnet-sdk-8.0.100-linux-x64.tar.gz -o dotnet.tar.gz && mkdir -p $HOME/.dotnet && tar -zxf dotnet.tar.gz -C $HOME/.dotnet)
+        export PATH=$PATH:$HOME/.dotnet
       fi
     - dotnet --version || true
     - az --version || true
@@ -39,8 +47,14 @@ variables:
 
 build:
   stage: build
+  variables:
+    GIT_STRATEGY: "none"
+  needs:
+    - job: checkout_repo
+      artifacts: true
   script:
     - echo "Restoring packages"
+    - ls -la
     - dotnet restore "$DOTNET_PROJECT_PATH"
     - echo "Building project"
     - dotnet build "$DOTNET_PROJECT_PATH" --configuration "$DOTNET_CONFIGURATION" --no-restore
@@ -53,6 +67,8 @@ publish:
   stage: publish
   needs:
     - build
+  variables:
+    GIT_STRATEGY: "none"
   script:
     - echo "Publishing project to $PUBLISH_DIR"
     - dotnet publish "$DOTNET_PROJECT_PATH" -c "$DOTNET_CONFIGURATION" -o "$PUBLISH_DIR"
@@ -65,6 +81,8 @@ package:
   stage: package
   needs:
     - publish
+  variables:
+    GIT_STRATEGY: "none"
   script:
     - echo "Packaging $PUBLISH_DIR into $ZIP_NAME"
     - cd "$PUBLISH_DIR"
@@ -80,6 +98,8 @@ deploy_dev:
   stage: deploy
   needs:
     - package
+  variables:
+    GIT_STRATEGY: "none"
   environment:
     name: dev
   script:
