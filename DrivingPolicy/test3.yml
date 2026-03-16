@@ -6,7 +6,8 @@ stages:
 
 default:
   tags:
-    - restricted-runner
+    - docker
+  image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
   before_script:
     - set -euo pipefail
     - echo "Runner environment:"
