@@ -7,13 +7,17 @@ stages:
 
 checkout_repo:
   stage: fetch
+  variables:
+    GIT_STRATEGY: "none"
   script:
     - echo "Runner used for checkout $CI_RUNNER_DESCRIPTION"
-    - ls -la
+    - echo "Using proxy $HTTP_PROXY / $HTTPS_PROXY"
+    - git -c http.proxy="$HTTP_PROXY" -c https.proxy="$HTTPS_PROXY" clone "https://oauth2:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" repo || { echo "manual git clone failed"; exit 1; }
+    - ls -la repo
   artifacts:
     name: repo-${CI_COMMIT_SHORT_SHA}
     paths:
-      - .
+      - repo
     expire_in: 1h
 
 default:
@@ -39,7 +43,7 @@ default:
       else
         echo "dotnet already installed";
       fi
-    - 'export PATH=$PATH:$HOME/.dotnet || true'
+    - export PATH="$PATH:$HOME/.dotnet" || true
     - dotnet --version || true
     - az --version || true
     - zip -v || true
@@ -62,13 +66,14 @@ build:
   script:
     - echo "Restoring packages"
     - ls -la
+    - cd repo
     - dotnet restore "$DOTNET_PROJECT_PATH"
     - echo "Building project"
     - dotnet build "$DOTNET_PROJECT_PATH" --configuration "$DOTNET_CONFIGURATION" --no-restore
   artifacts:
     expire_in: 1h
     paths:
-      - .nuget/packages
+      - repo/.nuget/packages
 
 publish:
   stage: publish
@@ -77,8 +82,9 @@ publish:
   variables:
     GIT_STRATEGY: "none"
   script:
+    - cd repo
     - echo "Publishing project to $PUBLISH_DIR"
-    - dotnet publish "$DOTNET_PROJECT_PATH" -c "$DOTNET_CONFIGURATION" -o "$PUBLISH_DIR"
+    - dotnet publish "$DOTNET_PROJECT_PATH" -c "$DOTNET_CONFIGURATION" -o "../$PUBLISH_DIR"
   artifacts:
     paths:
       - $PUBLISH_DIR
@@ -93,7 +99,7 @@ package:
   script:
     - echo "Packaging $PUBLISH_DIR into $ZIP_NAME"
     - cd "$PUBLISH_DIR"
-    - zip -r ../"$ZIP_NAME" .
+    - zip -r "../$ZIP_NAME" .
     - cd ..
     - ls -la "$ZIP_NAME"
   artifacts:
