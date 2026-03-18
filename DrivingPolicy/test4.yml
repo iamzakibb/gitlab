@@ -1,0 +1,62 @@
+stages:
+  - fetch
+  - verify
+
+checkout_repo:
+  stage: fetch
+  image: null  # This forces it to use the default image
+  variables:
+    GIT_STRATEGY: "none"
+  before_script:
+    - if ! command -v zip >/dev/null 2>&1; then
+        echo "zip not found - installing";
+        apt-get update && apt-get install -y zip || { echo "zip installation failed"; exit 1; }
+      else
+        echo "zip already installed";
+      fi
+    - if ! command -v unzip >/dev/null 2>&1; then
+        echo "unzip not found - installing";
+        apt-get install -y unzip || { echo "unzip installation failed"; exit 1; }
+      else
+        echo "unzip already installed";
+      fi
+  script:
+    - echo "Downloading repository archive instead of git clone"
+    - 'curl --header "PRIVATE-TOKEN: $CI_PAT_TOKEN" -L "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.zip?sha=${CI_COMMIT_SHA}" -o repo.zip'
+    - unzip repo.zip
+    - extracted_dir=$(ls -d */ | head -n1)
+    - echo "Extracted directory $extracted_dir"
+    - mv "$extracted_dir" repo
+    - ls -la repo
+  artifacts:
+    name: repo-${CI_COMMIT_SHORT_SHA}
+    paths:
+      - repo
+    expire_in: 1h
+
+default:
+  tags:
+    - docker
+  image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
+  before_script:
+    - set -euo pipefail
+    - echo "Runner environment $CI_RUNNER_DESCRIPTION"
+
+verify_artifact:
+  stage: verify
+  image: null  # Also fix for verify job
+  script:
+    - echo "Checking if artifact was passed correctly..."
+    - echo "Current directory contents:"
+    - ls -la
+    - echo "Checking repo directory contents:"
+    - if [ -d "repo" ]; then
+        ls -la repo/;
+        echo "Artifact verification successful! repo directory exists and contains files.";
+      else
+        echo "Artifact verification failed! repo directory not found.";
+        exit 1;
+      fi
+  needs:
+    - job: checkout_repo
+      artifacts: true
