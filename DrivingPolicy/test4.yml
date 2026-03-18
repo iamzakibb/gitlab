@@ -4,71 +4,29 @@ stages:
 
 checkout_repo:
   stage: fetch
+  image: null
   variables:
     GIT_STRATEGY: "none"
-    # Proxy variables - these will be inherited from GitLab CI/CD variables
+    # These are already set in your group; we just reference them
     HTTP_PROXY: ${HTTP_PROXY}
     HTTPS_PROXY: ${HTTPS_PROXY}
-    # Also set the lowercase versions for compatibility
     http_proxy: ${HTTP_PROXY}
     https_proxy: ${HTTPS_PROXY}
-    no_proxy: ${NO_PROXY}
-    NO_PROXY: ${NO_PROXY}
   before_script:
-    # Display proxy settings (without exposing credentials)
-    - echo "Proxy configuration:"
-    - echo "HTTP_PROXY is ${HTTP_PROXY:+set}"
-    - echo "HTTPS_PROXY is ${HTTPS_PROXY:+set}"
-
-    # Configure curl to use proxy
-    - if [ -n "$HTTP_PROXY" ]; then
-        echo "Configuring curl to use HTTP proxy $HTTP_PROXY";
-        echo "proxy = $HTTP_PROXY" >> ~/.curlrc;
-      fi
-    - if [ -n "$HTTPS_PROXY" ]; then
-        echo "Configuring curl to use HTTPS proxy $HTTPS_PROXY";
-        echo "https-proxy = $HTTPS_PROXY" >> ~/.curlrc;
-      fi
-
-    # Install packages with proxy awareness
-    - if ! command -v zip >/dev/null 2>&1; then
-        echo "zip not found - installing";
-        HTTPS_PROXY=$HTTPS_PROXY HTTP_PROXY=$HTTP_PROXY apk add --no-cache zip || {
-          echo "zip installation failed - trying without proxy";
-          apk add --no-cache zip || { echo "zip installation failed"; exit 1; }
-        }
-      else
-        echo "zip already installed";
-      fi
-    - if ! command -v unzip >/dev/null 2>&1; then
-        echo "unzip not found - installing";
-        HTTPS_PROXY=$HTTPS_PROXY HTTP_PROXY=$HTTP_PROXY apk add --no-cache unzip || {
-          echo "unzip installation failed - trying without proxy";
-          apk add --no-cache unzip || { echo "unzip installation failed"; exit 1; }
-        }
-      else
-        echo "unzip already installed";
-      fi
-    - if ! command -v curl >/dev/null 2>&1; then
-        echo "curl not found - installing";
-        HTTPS_PROXY=$HTTPS_PROXY HTTP_PROXY=$HTTP_PROXY apk add --no-cache curl || {
-          echo "curl installation failed - trying without proxy";
-          apk add --no-cache curl || { echo "curl installation failed"; exit 1; }
-        }
-      else
-        echo "curl already installed";
-      fi
+    # Dynamically set NO_PROXY – no manual input needed
+    - export NO_PROXY="localhost,127.0.0.1,.local,${CI_SERVER_HOST},dl-cdn.alpinelinux.org,alpinelinux.org"
+    - export no_proxy="$NO_PROXY"
+    - echo "Using NO_PROXY=$NO_PROXY"
+    # Install packages (Alpine repos are in NO_PROXY, so they bypass proxy)
+    - apk add --no-cache curl unzip zip
   script:
-    - echo "Downloading repository archive instead of git clone"
-    # Use curl with proxy settings (--proxy flag explicitly set)
-    - 'curl --proxy "$HTTPS_PROXY" --proxy-insecure --header "PRIVATE-TOKEN: $CI_PAT_TOKEN" -L "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.zip?sha=${CI_COMMIT_SHA}" -o repo.zip'
+    - echo "Downloading repository..."
+    - 'curl --header "PRIVATE-TOKEN: $CI_PAT_TOKEN" -L "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.zip?sha=${CI_COMMIT_SHA}" -o repo.zip'
     - unzip repo.zip
     - extracted_dir=$(ls -d */ | head -n1)
-    - echo "Extracted directory $extracted_dir"
     - mv "$extracted_dir" repo
     - ls -la repo
   artifacts:
-    name: repo-${CI_COMMIT_SHORT_SHA}
     paths:
       - repo
     expire_in: 1h
@@ -79,32 +37,16 @@ default:
   image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
   before_script:
     - set -euo pipefail
-    - echo "Runner environment $CI_RUNNER_DESCRIPTION"
-    # Display proxy status
-    - echo "Proxy settings from environment:"
-    - echo "HTTP_PROXY is ${HTTP_PROXY:+set}"
-    - echo "HTTPS_PROXY is ${HTTPS_PROXY:+set}"
 
 verify_artifact:
   stage: verify
-  variables:
-    # Also include proxy variables in verify stage for consistency
-    HTTP_PROXY: ${HTTP_PROXY}
-    HTTPS_PROXY: ${HTTPS_PROXY}
-    http_proxy: ${HTTP_PROXY}
-    https_proxy: ${HTTPS_PROXY}
+  image: null
+  before_script:
+    - export NO_PROXY="localhost,127.0.0.1,.local,${CI_SERVER_HOST}"
+    - export no_proxy="$NO_PROXY"
   script:
-    - echo "Checking if artifact was passed correctly..."
-    - echo "Current directory contents:"
-    - ls -la
-    - echo "Checking repo directory contents:"
-    - if [ -d "repo" ]; then
-        ls -la repo/;
-        echo "Artifact verification successful! repo directory exists and contains files.";
-      else
-        echo "Artifact verification failed! repo directory not found.";
-        exit 1;
-      fi
+    - ls -la repo/ || (echo "repo missing" && exit 1)
+    - echo "Artifact verified"
   needs:
     - job: checkout_repo
       artifacts: true
