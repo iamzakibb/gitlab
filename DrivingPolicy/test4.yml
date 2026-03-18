@@ -1,52 +1,59 @@
 stages:
-  - fetch
-  - verify
+  - run
 
-checkout_repo:
-  stage: fetch
-  image: null
-  variables:
-    GIT_STRATEGY: "none"
-    # These are already set in your group; we just reference them
-    HTTP_PROXY: ${HTTP_PROXY}
-    HTTPS_PROXY: ${HTTPS_PROXY}
-    http_proxy: ${HTTP_PROXY}
-    https_proxy: ${HTTPS_PROXY}
-  before_script:
-    # Dynamically set NO_PROXY – no manual input needed
-    - export NO_PROXY="localhost,127.0.0.1,.local,${CI_SERVER_HOST},dl-cdn.alpinelinux.org,alpinelinux.org"
-    - export no_proxy="$NO_PROXY"
-    - echo "Using NO_PROXY=$NO_PROXY"
-    # Install packages (Alpine repos are in NO_PROXY, so they bypass proxy)
-    - apk add --no-cache curl unzip zip
-  script:
-    - echo "Downloading repository..."
-    - 'curl --header "PRIVATE-TOKEN: $CI_PAT_TOKEN" -L "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.zip?sha=${CI_COMMIT_SHA}" -o repo.zip'
-    - unzip repo.zip
-    - extracted_dir=$(ls -d */ | head -n1)
-    - mv "$extracted_dir" repo
-    - ls -la repo
-  artifacts:
-    paths:
-      - repo
-    expire_in: 1h
-
-default:
+run_pipeline:
+  stage: run
   tags:
     - docker
   image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
+  variables:
+    GIT_STRATEGY: "none"
   before_script:
     - set -euo pipefail
+    - echo "Runner $CI_RUNNER_DESCRIPTION"
 
-verify_artifact:
-  stage: verify
-  image: null
-  before_script:
-    - export NO_PROXY="localhost,127.0.0.1,.local,${CI_SERVER_HOST}"
-    - export no_proxy="$NO_PROXY"
   script:
-    - ls -la repo/ || (echo "repo missing" && exit 1)
-    - echo "Artifact verified"
-  needs:
-    - job: checkout_repo
-      artifacts: true
+    # Install dotnet (your exact command)
+    - echo "Installing dotnet using install script with fallback"; curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet || (echo "Install script failed, trying tarball fallback" && curl -L https://dotnetcli.azureedge.net/dotnet/Sdk/8.0.100/dotnet-sdk-8.0.100-linux-x64.tar.gz -o dotnet.tar.gz && mkdir -p $HOME/.dotnet && tar -zxf dotnet.tar.gz -C $HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet)
+
+    # Ensure PATH persists
+    - export PATH="$HOME/.dotnet:$PATH"
+
+    # Verify tools
+    - dotnet --version || true
+    - az --version || true
+
+    # Download repo via API (no git clone) with retry
+    - echo "Downloading repo via API"
+    - 'curl --retry 3 --retry-delay 5 --header "PRIVATE-TOKEN: $CI_PAT_TOKEN" -L "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.tar.gz?sha=${CI_COMMIT_SHA}" -o repo.tar.gz'
+
+    # Extract
+    - mkdir repo
+    - tar -xzf repo.tar.gz -C repo --strip-components=1
+    - ls -la repo
+
+    # Build
+    - cd repo
+    - dotnet restore "src/DrivingPolicy/DrivingPolicy.csproj"
+    - dotnet build "src/DrivingPolicy/DrivingPolicy.csproj" --configuration Release --no-restore
+
+    # Publish
+    - dotnet publish "src/DrivingPolicy/DrivingPolicy.csproj" -c Release -o ../publish
+
+    # Package (zip preferred, tar fallback)
+    - cd ../publish
+    - |
+      if command -v zip >/dev/null 2>&1; then
+        zip -r ../app_publish.zip .
+        PACKAGE_FILE=app_publish.zip
+      else
+        echo "zip not found, using tar.gz fallback"
+        tar -czf ../app_publish.tar.gz .
+        PACKAGE_FILE=app_publish.tar.gz
+      fi
+    - cd ..
+
+    # Deploy
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - az webapp deployment source config-zip --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME_DEV" --src "$PACKAGE_FILE"
