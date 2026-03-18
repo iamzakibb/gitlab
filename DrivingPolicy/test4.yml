@@ -10,15 +10,21 @@ checkout_repo:
   before_script:
     - if ! command -v zip >/dev/null 2>&1; then
         echo "zip not found - installing";
-        apt-get update && apt-get install -y zip || { echo "zip installation failed"; exit 1; }
+        apk add --no-cache zip || { echo "zip installation failed"; exit 1; }
       else
         echo "zip already installed";
       fi
     - if ! command -v unzip >/dev/null 2>&1; then
         echo "unzip not found - installing";
-        apt-get install -y unzip || { echo "unzip installation failed"; exit 1; }
+        apk add --no-cache unzip || { echo "unzip installation failed"; exit 1; }
       else
         echo "unzip already installed";
+      fi
+    - if ! command -v curl >/dev/null 2>&1; then
+        echo "curl not found - installing";
+        apk add --no-cache curl || { echo "curl installation failed"; exit 1; }
+      else
+        echo "curl already installed";
       fi
   script:
     - echo "Downloading repository archive instead of git clone"
