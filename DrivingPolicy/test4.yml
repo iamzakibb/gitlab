@@ -52,7 +52,12 @@ run_pipeline:
         PACKAGE_FILE=app_publish.tar.gz
       fi
     - cd ..
-
+    - export HTTP_PROXY="$HTTP_PROXY"
+    - export HTTPS_PROXY="$HTTPS_PROXY"
+    - export http_proxy="$HTTP_PROXY"
+    - export https_proxy="$HTTPS_PROXY"
+    - export NO_PROXY="$NO_PROXY"
+    - export no_proxy="$NO_PROXY"
     # Deploy
     - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
     - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
