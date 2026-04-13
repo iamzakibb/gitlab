@@ -40,17 +40,17 @@ run_pipeline:
     # Publish
     - dotnet publish "src/DrivingPolicy/DrivingPolicy.csproj" -c Release -o ../publish
 
-    # Package (zip preferred, tar fallback)
+    # Package as zip for Azure Web App deploy
     - cd ../publish
     - |
       if command -v zip >/dev/null 2>&1; then
         zip -r ../app_publish.zip .
-        PACKAGE_FILE=app_publish.zip
       else
-        echo "zip not found, using tar.gz fallback"
-        tar -czf ../app_publish.tar.gz .
-        PACKAGE_FILE=app_publish.tar.gz
+        echo "zip not found, creating zip with python"
+        python3 -c "import os, zipfile; archive = zipfile.ZipFile('../app_publish.zip', 'w', zipfile.ZIP_DEFLATED); [archive.write(os.path.join(root, file_name), os.path.relpath(os.path.join(root, file_name), '.')) for root, _, files in os.walk('.') for file_name in files]; archive.close()"
       fi
+      PACKAGE_FILE=app_publish.zip
+      test -f ../"$PACKAGE_FILE"
     - cd ..
     - export HTTP_PROXY="$HTTP_PROXY"
     - export HTTPS_PROXY="$HTTPS_PROXY"
