@@ -47,7 +47,9 @@ run_pipeline:
         zip -r ../app_publish.zip .
       else
         echo "zip not found, creating zip with python"
-        python3 -c "import os, zipfile; archive = zipfile.ZipFile('../app_publish.zip', 'w', zipfile.ZIP_DEFLATED); [archive.write(os.path.join(root, file_name), os.path.relpath(os.path.join(root, file_name), '.')) for root, _, files in os.walk('.') for file_name in files]; archive.close()"
+        PYTHON_BIN="$(command -v python3 || command -v python || true)"
+        test -n "$PYTHON_BIN" || PYTHON_BIN=/opt/venv/bin/python
+        "$PYTHON_BIN" -c "import os, zipfile; archive = zipfile.ZipFile('../app_publish.zip', 'w', zipfile.ZIP_DEFLATED); [archive.write(os.path.join(root, file_name), os.path.relpath(os.path.join(root, file_name), '.')) for root, _, files in os.walk('.') for file_name in files]; archive.close()"
       fi
       PACKAGE_FILE=app_publish.zip
       test -f ../"$PACKAGE_FILE"
