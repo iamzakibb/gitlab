@@ -1,0 +1,95 @@
+stages:
+  - run
+
+run_pipeline:
+  stage: run
+  tags:
+    - docker
+  image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
+  variables:
+    GIT_STRATEGY: "none"
+  before_script:
+    - set -euo pipefail
+    - echo "Runner $CI_RUNNER_DESCRIPTION"
+
+  script:
+    # Install dotnet 
+    - echo "Installing dotnet using install script with fallback"; curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet || (echo "Install script failed, trying tarball fallback" && curl -L https://dotnetcli.azureedge.net/dotnet/Sdk/8.0.100/dotnet-sdk-8.0.100-linux-x64.tar.gz -o dotnet.tar.gz && mkdir -p $HOME/.dotnet && tar -zxf dotnet.tar.gz -C $HOME/.dotnet && export PATH=$PATH:$HOME/.dotnet)
+
+    # Ensure PATH persists
+    - export PATH="$HOME/.dotnet:$PATH"
+
+    # Verify tools
+    - dotnet --version || true
+    - az --version || true
+
+    # Download repo via API (no git clone) with retry
+    - echo "Downloading repo via API"
+    - 'curl --retry 3 --retry-delay 5 --header "PRIVATE-TOKEN: $CI_PAT_TOKEN" -L "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.tar.gz?sha=${CI_COMMIT_SHA}" -o repo.tar.gz'
+
+    # Extract
+    - mkdir repo
+    - tar -xzf repo.tar.gz -C repo --strip-components=1
+    - ls -la repo
+
+    # Build
+    - cd repo
+    - dotnet restore "src/DrivingPolicy/DrivingPolicy.csproj"
+    - dotnet build "src/DrivingPolicy/DrivingPolicy.csproj" --configuration Release --no-restore
+
+    # Publish
+    - dotnet publish "src/DrivingPolicy/DrivingPolicy.csproj" -c Release -o ../publish
+
+    # Package as zip for Azure Web App deploy
+    - cd ../publish
+    - |
+      if command -v zip >/dev/null 2>&1; then
+        zip -r ../app_publish.zip .
+      else
+        echo "zip not found, creating zip with python"
+        PYTHON_BIN="$(command -v python3 || command -v python || true)"
+        test -n "$PYTHON_BIN" || PYTHON_BIN=/opt/venv/bin/python
+        "$PYTHON_BIN" -c "import os, zipfile; archive = zipfile.ZipFile('../app_publish.zip', 'w', zipfile.ZIP_DEFLATED); [archive.write(os.path.join(root, file_name), os.path.relpath(os.path.join(root, file_name), '.')) for root, _, files in os.walk('.') for file_name in files]; archive.close()"
+      fi
+      PACKAGE_FILE=app_publish.zip
+      test -f ../"$PACKAGE_FILE"
+    - cd ..
+    - export HTTP_PROXY="$HTTP_PROXY"
+    - export HTTPS_PROXY="$HTTPS_PROXY"
+    - export http_proxy="$HTTP_PROXY"
+    - export https_proxy="$HTTPS_PROXY"
+    - export NO_PROXY="$NO_PROXY"
+    - export no_proxy="$NO_PROXY"
+
+    # Deploy with debug (try/catch style)
+    - |
+      set +e
+      echo "Starting Azure deployment..."
+
+      az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+      az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+
+      echo "Testing connectivity to SCM endpoint..."
+      curl -v https://$AZURE_WEBAPP_NAME_DEV.scm.azurewebsites.net || true
+
+      echo "Running deployment..."
+      az webapp deploy --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME_DEV" --src-path "$PACKAGE_FILE" --type zip
+      EXIT_CODE=$?
+
+      if [ $EXIT_CODE -ne 0 ]; then
+        echo "Deployment failed with exit code $EXIT_CODE"
+        echo "Checking DNS resolution..."
+        nslookup $AZURE_WEBAPP_NAME_DEV.scm.azurewebsites.net || true
+
+        echo "Checking connectivity (port 443)..."
+        curl -vk https://$AZURE_WEBAPP_NAME_DEV.scm.azurewebsites.net || true
+
+        echo "Environment proxy values:"
+        env | grep -i proxy || true
+
+        exit $EXIT_CODE
+      else
+        echo "Deployment succeeded"
+      fi
+
+      set -e
