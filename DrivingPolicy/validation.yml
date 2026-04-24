@@ -1,6 +1,3 @@
-stages:
-  - validate
-
 validate_azure_access:
   stage: validate
   tags:
@@ -10,61 +7,63 @@ validate_azure_access:
     GIT_STRATEGY: "none"
     APP_HOST: "your-app-name.azurewebsites.net"
     SCM_HOST: "your-app-name.scm.azurewebsites.net"
-
   script:
-    - set -euo pipefail
-    - echo "Runner $CI_RUNNER_DESCRIPTION"
-
-    # ---- Azure Login ----
     - |
-      echo "Validating Azure login..."
-      OUTPUT=$(az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" 2>&1)
-      if [ $? -ne 0 ]; then
-        echo "Azure Login Failed:"
-        echo "$OUTPUT" | tail -n 5
-        exit 1
+      set +e
+      echo "Runner: $CI_RUNNER_DESCRIPTION"
+
+      echo "Step 1: Azure login"
+      AZ_LOGIN_OUT=$(az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --output none 2>&1)
+      AZ_LOGIN_CODE=$?
+      if [ $AZ_LOGIN_CODE -ne 0 ]; then
+        echo "Azure login failed:"
+        echo "$AZ_LOGIN_OUT" | tail -n 20
+        exit $AZ_LOGIN_CODE
       fi
 
-    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
-
-    # ---- DNS Check APP ----
-    - |
-      echo "Checking DNS for APP..."
-      OUTPUT=$(nslookup "$APP_HOST" 2>&1)
-      if [ $? -ne 0 ]; then
-        echo "DNS Failed (APP):"
-        echo "$OUTPUT" | tail -n 3
-        exit 1
+      echo "Step 2: Azure account set"
+      AZ_SET_OUT=$(az account set --subscription "$AZURE_SUBSCRIPTION_ID" 2>&1)
+      AZ_SET_CODE=$?
+      if [ $AZ_SET_CODE -ne 0 ]; then
+        echo "Azure account set failed:"
+        echo "$AZ_SET_OUT" | tail -n 20
+        exit $AZ_SET_CODE
       fi
 
-    # ---- DNS Check SCM ----
-    - |
-      echo "Checking DNS for SCM..."
-      OUTPUT=$(nslookup "$SCM_HOST" 2>&1)
-      if [ $? -ne 0 ]; then
-        echo "DNS Failed (SCM):"
-        echo "$OUTPUT" | tail -n 3
-        exit 1
+      echo "Step 3: DNS check for app"
+      APP_DNS_OUT=$(nslookup "$APP_HOST" 2>&1)
+      APP_DNS_CODE=$?
+      if [ $APP_DNS_CODE -ne 0 ]; then
+        echo "DNS check failed for app host:"
+        echo "$APP_DNS_OUT" | tail -n 20
+        exit $APP_DNS_CODE
       fi
 
-    # ---- HTTPS Check APP ----
-    - |
-      echo "Checking HTTPS connectivity (APP)..."
-      OUTPUT=$(curl -sk --max-time 15 "https://$APP_HOST" 2>&1)
-      if [ $? -ne 0 ]; then
-        echo "HTTPS Failed (APP):"
-        echo "$OUTPUT" | grep -E "error|fail|reset|refused|timeout" | tail -n 3 || echo "$OUTPUT" | tail -n 3
-        exit 1
+      echo "Step 4: DNS check for SCM"
+      SCM_DNS_OUT=$(nslookup "$SCM_HOST" 2>&1)
+      SCM_DNS_CODE=$?
+      if [ $SCM_DNS_CODE -ne 0 ]; then
+        echo "DNS check failed for SCM host:"
+        echo "$SCM_DNS_OUT" | tail -n 20
+        exit $SCM_DNS_CODE
       fi
 
-    # ---- HTTPS Check SCM ----
-    - |
-      echo "Checking HTTPS connectivity (SCM)..."
-      OUTPUT=$(curl -sk --max-time 15 "https://$SCM_HOST" 2>&1)
-      if [ $? -ne 0 ]; then
-        echo "HTTPS Failed (SCM):"
-        echo "$OUTPUT" | grep -E "error|fail|reset|refused|timeout" | tail -n 3 || echo "$OUTPUT" | tail -n 3
-        exit 1
+      echo "Step 5: HTTPS check for app"
+      APP_CURL_OUT=$(curl -vk --max-time 20 "https://$APP_HOST" 2>&1)
+      APP_CURL_CODE=$?
+      if [ $APP_CURL_CODE -ne 0 ]; then
+        echo "HTTPS check failed for app host:"
+        echo "$APP_CURL_OUT" | tail -n 30
+        exit $APP_CURL_CODE
       fi
 
-    - echo "Validation stage passed successfully"
+      echo "Step 6: HTTPS check for SCM"
+      SCM_CURL_OUT=$(curl -vk --max-time 20 "https://$SCM_HOST" 2>&1)
+      SCM_CURL_CODE=$?
+      if [ $SCM_CURL_CODE -ne 0 ]; then
+        echo "HTTPS check failed for SCM host:"
+        echo "$SCM_CURL_OUT" | tail -n 30
+        exit $SCM_CURL_CODE
+      fi
+
+      echo "Validation stage passed successfully"
