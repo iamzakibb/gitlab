@@ -1,3 +1,5 @@
+stages:
+  - validate
 validate_azure_access:
   stage: validate
   tags:
