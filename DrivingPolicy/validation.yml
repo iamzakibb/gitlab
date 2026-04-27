@@ -1,5 +1,6 @@
 stages:
   - validate
+
 validate_azure_access:
   stage: validate
   tags:
@@ -9,63 +10,53 @@ validate_azure_access:
     GIT_STRATEGY: "none"
     APP_HOST: "your-app-name.azurewebsites.net"
     SCM_HOST: "your-app-name.scm.azurewebsites.net"
+
   script:
     - |
-      set +e
+      set -u
+
+      show_tail() {
+        file="$1"
+        lines="${2:-30}"
+        if [ -s "$file" ]; then
+          tail -n "$lines" "$file"
+        fi
+      }
+
+      run_step() {
+        name="$1"
+        shift
+        out_file="$(mktemp)"
+        echo "===== $name ====="
+        "$@" >"$out_file" 2>&1
+        rc=$?
+        if [ $rc -ne 0 ]; then
+          echo "$name failed (exit $rc)"
+          show_tail "$out_file" 40
+          rm -f "$out_file"
+          exit $rc
+        fi
+        echo "$name succeeded"
+        show_tail "$out_file" 20
+        rm -f "$out_file"
+      }
+
       echo "Runner: $CI_RUNNER_DESCRIPTION"
+      echo "Server host: $CI_SERVER_HOST"
+      echo "Project path: $CI_PROJECT_PATH"
+      echo "Proxy env present:"
+      env | grep -iE '^(http|https|no)_proxy=' || echo "No proxy vars present"
 
-      echo "Step 1: Azure login"
-      AZ_LOGIN_OUT=$(az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --output none 2>&1)
-      AZ_LOGIN_CODE=$?
-      if [ $AZ_LOGIN_CODE -ne 0 ]; then
-        echo "Azure login failed:"
-        echo "$AZ_LOGIN_OUT" | tail -n 20
-        exit $AZ_LOGIN_CODE
-      fi
+      run_step "Azure login" az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
+      run_step "Set subscription" az account set --subscription "$AZURE_SUBSCRIPTION_ID"
 
-      echo "Step 2: Azure account set"
-      AZ_SET_OUT=$(az account set --subscription "$AZURE_SUBSCRIPTION_ID" 2>&1)
-      AZ_SET_CODE=$?
-      if [ $AZ_SET_CODE -ne 0 ]; then
-        echo "Azure account set failed:"
-        echo "$AZ_SET_OUT" | tail -n 20
-        exit $AZ_SET_CODE
-      fi
+      echo "Azure account context:"
+      az account show --query "{subscription:id,tenantId:tenantId,user:user.name}" -o yaml
 
-      echo "Step 3: DNS check for app"
-      APP_DNS_OUT=$(nslookup "$APP_HOST" 2>&1)
-      APP_DNS_CODE=$?
-      if [ $APP_DNS_CODE -ne 0 ]; then
-        echo "DNS check failed for app host:"
-        echo "$APP_DNS_OUT" | tail -n 20
-        exit $APP_DNS_CODE
-      fi
+      run_step "DNS check APP" nslookup "$APP_HOST"
+      run_step "DNS check SCM" nslookup "$SCM_HOST"
 
-      echo "Step 4: DNS check for SCM"
-      SCM_DNS_OUT=$(nslookup "$SCM_HOST" 2>&1)
-      SCM_DNS_CODE=$?
-      if [ $SCM_DNS_CODE -ne 0 ]; then
-        echo "DNS check failed for SCM host:"
-        echo "$SCM_DNS_OUT" | tail -n 20
-        exit $SCM_DNS_CODE
-      fi
-
-      echo "Step 5: HTTPS check for app"
-      APP_CURL_OUT=$(curl -vk --max-time 20 "https://$APP_HOST" 2>&1)
-      APP_CURL_CODE=$?
-      if [ $APP_CURL_CODE -ne 0 ]; then
-        echo "HTTPS check failed for app host:"
-        echo "$APP_CURL_OUT" | tail -n 30
-        exit $APP_CURL_CODE
-      fi
-
-      echo "Step 6: HTTPS check for SCM"
-      SCM_CURL_OUT=$(curl -vk --max-time 20 "https://$SCM_HOST" 2>&1)
-      SCM_CURL_CODE=$?
-      if [ $SCM_CURL_CODE -ne 0 ]; then
-        echo "HTTPS check failed for SCM host:"
-        echo "$SCM_CURL_OUT" | tail -n 30
-        exit $SCM_CURL_CODE
-      fi
+      run_step "HTTPS check APP" curl -skvI --max-time 20 "https://$APP_HOST"
+      run_step "HTTPS check SCM" curl -skvI --max-time 20 "https://$SCM_HOST"
 
       echo "Validation stage passed successfully"
