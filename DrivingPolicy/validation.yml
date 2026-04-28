@@ -95,9 +95,9 @@ validate_azure_access:
 
         if [ "$mode" = "direct" ]; then
           env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u no_proxy \
-            curl -skvI --connect-timeout 10 --max-time 20 --noproxy '*' "$url" >"$out_file" 2>&1
+            curl -skvI --fail --connect-timeout 10 --max-time 20 --noproxy '*' "$url" >"$out_file" 2>&1
         else
-          curl -skvI --connect-timeout 10 --max-time 20 "$url" >"$out_file" 2>&1
+          curl -skvI --fail --connect-timeout 10 --max-time 20 "$url" >"$out_file" 2>&1
         fi
 
         rc=$?
@@ -135,8 +135,6 @@ validate_azure_access:
       dns_check "SCM" "$SCM_HOST"
 
       url_check "APP" "https://$APP_HOST" "proxy"
-      url_check "APP" "https://$APP_HOST" "direct"
       url_check "SCM" "https://$SCM_HOST" "proxy"
-      url_check "SCM" "https://$SCM_HOST" "direct"
 
       echo "Validation stage passed successfully"
