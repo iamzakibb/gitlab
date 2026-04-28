@@ -122,8 +122,16 @@ validate_azure_access:
       echo "Project path: $CI_PROJECT_PATH"
       echo "App host: $APP_HOST"
       echo "SCM host: $SCM_HOST"
-      echo "Proxy env present:"
+
+      echo "Proxy env BEFORE update:"
       env | grep -iE '^(http|https|no)_proxy=' || echo "No proxy vars present"
+
+      # NO_PROXY override
+      export NO_PROXY="$NO_PROXY,$APP_HOST,$SCM_HOST,$CI_SERVER_HOST"
+      export no_proxy="$NO_PROXY"
+
+      echo "Proxy env AFTER update:"
+      env | grep -iE '^(http|https|no)_proxy='
 
       run_step "Azure login" az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
       run_step "Set subscription" az account set --subscription "$AZURE_SUBSCRIPTION_ID"
