@@ -13,14 +13,24 @@ validate_azure_access:
 
   script:
     - |
-      set -u
+      set +e
 
       show_tail() {
         file="$1"
-        lines="${2:-30}"
+        lines="${2:-40}"
         if [ -s "$file" ]; then
           tail -n "$lines" "$file"
         fi
+      }
+
+      fail_with() {
+        step="$1"
+        file="$2"
+        code="$3"
+        echo "$step failed (exit $code)"
+        show_tail "$file" 60
+        rm -f "$file"
+        exit "$code"
       }
 
       run_step() {
@@ -31,12 +41,78 @@ validate_azure_access:
         "$@" >"$out_file" 2>&1
         rc=$?
         if [ $rc -ne 0 ]; then
-          echo "$name failed (exit $rc)"
-          show_tail "$out_file" 40
+          fail_with "$name" "$out_file" "$rc"
+        fi
+        echo "$name succeeded"
+        show_tail "$out_file" 20
+        rm -f "$out_file"
+      }
+
+      url_host() {
+        echo "$1" | sed -E 's#^https?://([^/]+).*$#\1#'
+      }
+
+      dns_check() {
+        label="$1"
+        host="$2"
+        out_file="$(mktemp)"
+
+        echo "===== DNS check $label ====="
+        {
+          echo "Host: $host"
+          echo "nslookup:"
+          nslookup "$host"
+          echo "getent:"
+          if command -v getent >/dev/null 2>&1; then
+            getent ahostsv4 "$host" || getent hosts "$host"
+          else
+            echo "getent not available"
+            exit 1
+          fi
+        } >"$out_file" 2>&1
+        rc=$?
+        if [ $rc -ne 0 ]; then
+          echo "DNS check failed for $label (exit $rc)"
+          show_tail "$out_file" 60
           rm -f "$out_file"
           exit $rc
         fi
-        echo "$name succeeded"
+        echo "DNS check $label succeeded"
+        show_tail "$out_file" 20
+        rm -f "$out_file"
+      }
+
+      url_check() {
+        label="$1"
+        url="$2"
+        mode="$3"
+        host="$(url_host "$url")"
+        out_file="$(mktemp)"
+
+        echo "===== HTTPS check $label ($mode) ====="
+        echo "URL: $url"
+        echo "Host: $host"
+
+        if [ "$mode" = "direct" ]; then
+          env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u no_proxy \
+            curl -skvI --connect-timeout 10 --max-time 20 --noproxy '*' "$url" >"$out_file" 2>&1
+        else
+          curl -skvI --connect-timeout 10 --max-time 20 "$url" >"$out_file" 2>&1
+        fi
+
+        rc=$?
+        if [ $rc -ne 0 ]; then
+          echo "HTTPS check failed for $label ($mode), exit $rc"
+          echo "Reason:"
+          grep -Ei 'Could not resolve host|Could not resolve proxy|Connection reset by peer|timed out|SSL|TLS|403|401|404|502|503|504|connection refused|name resolution' "$out_file" | tail -n 10
+          if [ $? -ne 0 ]; then
+            show_tail "$out_file" 60
+          fi
+          rm -f "$out_file"
+          exit $rc
+        fi
+
+        echo "HTTPS check $label ($mode) succeeded"
         show_tail "$out_file" 20
         rm -f "$out_file"
       }
@@ -44,6 +120,8 @@ validate_azure_access:
       echo "Runner: $CI_RUNNER_DESCRIPTION"
       echo "Server host: $CI_SERVER_HOST"
       echo "Project path: $CI_PROJECT_PATH"
+      echo "App host: $APP_HOST"
+      echo "SCM host: $SCM_HOST"
       echo "Proxy env present:"
       env | grep -iE '^(http|https|no)_proxy=' || echo "No proxy vars present"
 
@@ -53,10 +131,12 @@ validate_azure_access:
       echo "Azure account context:"
       az account show --query "{subscription:id,tenantId:tenantId,user:user.name}" -o yaml
 
-      run_step "DNS check APP" nslookup "$APP_HOST"
-      run_step "DNS check SCM" nslookup "$SCM_HOST"
+      dns_check "APP" "$APP_HOST"
+      dns_check "SCM" "$SCM_HOST"
 
-      run_step "HTTPS check APP" curl -skvI --max-time 20 "https://$APP_HOST"
-      run_step "HTTPS check SCM" curl -skvI --max-time 20 "https://$SCM_HOST"
+      url_check "APP" "https://$APP_HOST" "proxy"
+      url_check "APP" "https://$APP_HOST" "direct"
+      url_check "SCM" "https://$SCM_HOST" "proxy"
+      url_check "SCM" "https://$SCM_HOST" "direct"
 
       echo "Validation stage passed successfully"
