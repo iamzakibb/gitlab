@@ -10,6 +10,12 @@ validate_azure_access:
     GIT_STRATEGY: "none"
     APP_HOST: "your-app-name.azurewebsites.net"
     SCM_HOST: "your-app-name.scm.azurewebsites.net"
+    HTTP_PROXY: ""
+    HTTPS_PROXY: ""
+    http_proxy: ""
+    https_proxy: ""
+    NO_PROXY: ""
+    no_proxy: ""
 
   script:
     - |
@@ -126,7 +132,6 @@ validate_azure_access:
       echo "Proxy env BEFORE update:"
       env | grep -iE '^(http|https|no)_proxy=' || echo "No proxy vars present"
 
-      # NO_PROXY override
       export NO_PROXY="$NO_PROXY,$APP_HOST,$SCM_HOST,$CI_SERVER_HOST"
       export no_proxy="$NO_PROXY"
 
