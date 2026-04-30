@@ -1,43 +1,19 @@
 stages:
   - validate
 
-validate_azure_access:
+validate_storage_access:
   stage: validate
   tags:
     - docker
   image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
+
   variables:
     GIT_STRATEGY: "none"
-    APP_HOST: "your-app-name.azurewebsites.net"
-    SCM_HOST: "your-app-name.scm.azurewebsites.net"
-    HTTP_PROXY: ""
-    HTTPS_PROXY: ""
-    http_proxy: ""
-    https_proxy: ""
-    NO_PROXY: ""
-    no_proxy: ""
-
+    STORAGE_ACCOUNT_NAME: "stgdrivingpooicydev12345"   # hardcoded (must be globally unique)
+    AZURE_LOCATION : ""
   script:
     - |
       set +e
-
-      show_tail() {
-        file="$1"
-        lines="${2:-40}"
-        if [ -s "$file" ]; then
-          tail -n "$lines" "$file"
-        fi
-      }
-
-      fail_with() {
-        step="$1"
-        file="$2"
-        code="$3"
-        echo "$step failed (exit $code)"
-        show_tail "$file" 60
-        rm -f "$file"
-        exit "$code"
-      }
 
       run_step() {
         name="$1"
@@ -46,108 +22,70 @@ validate_azure_access:
         echo "===== $name ====="
         "$@" >"$out_file" 2>&1
         rc=$?
+
         if [ $rc -ne 0 ]; then
-          fail_with "$name" "$out_file" "$rc"
+          echo "$name failed (exit $rc)"
+          echo "Error details:"
+          tail -n 40 "$out_file"
+          rm -f "$out_file"
+          exit $rc
         fi
+
         echo "$name succeeded"
-        show_tail "$out_file" 20
+        tail -n 20 "$out_file"
         rm -f "$out_file"
       }
 
-      url_host() {
-        echo "$1" | sed -E 's#^https?://([^/]+).*$#\1#'
-      }
+      echo "Runner $CI_RUNNER_DESCRIPTION"
 
-      dns_check() {
-        label="$1"
-        host="$2"
-        out_file="$(mktemp)"
+      echo "===== Azure Login ====="
+      run_step "Azure login" \
+        az login --service-principal \
+        -u "$AZURE_CLIENT_ID" \
+        -p "$AZURE_CLIENT_SECRET" \
+        --tenant "$AZURE_TENANT_ID" \
+        --only-show-errors -o none
 
-        echo "===== DNS check $label ====="
-        {
-          echo "Host: $host"
-          echo "nslookup:"
-          nslookup "$host"
-          echo "getent:"
-          if command -v getent >/dev/null 2>&1; then
-            getent ahostsv4 "$host" || getent hosts "$host"
-          else
-            echo "getent not available"
-            exit 1
-          fi
-        } >"$out_file" 2>&1
-        rc=$?
-        if [ $rc -ne 0 ]; then
-          echo "DNS check failed for $label (exit $rc)"
-          show_tail "$out_file" 60
-          rm -f "$out_file"
-          exit $rc
-        fi
-        echo "DNS check $label succeeded"
-        show_tail "$out_file" 20
-        rm -f "$out_file"
-      }
+      echo "===== Set Subscription ====="
+      run_step "Set subscription" \
+        az account set --subscription "$AZURE_SUBSCRIPTION_ID"
 
-      url_check() {
-        label="$1"
-        url="$2"
-        mode="$3"
-        host="$(url_host "$url")"
-        out_file="$(mktemp)"
+      echo "===== Azure Context ====="
+      az account show --query "{subscription:id,tenant:tenantId,user:user.name}" -o table
 
-        echo "===== HTTPS check $label ($mode) ====="
-        echo "URL: $url"
-        echo "Host: $host"
+      echo "===== Validate Resource Group ====="
+      run_step "Check resource group" \
+        az group show --name "$AZURE_RESOURCE_GROUP"
 
-        if [ "$mode" = "direct" ]; then
-          env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u no_proxy \
-            curl -skvI --fail --connect-timeout 10 --max-time 20 --noproxy '*' "$url" >"$out_file" 2>&1
-        else
-          curl -skvI --fail --connect-timeout 10 --max-time 20 "$url" >"$out_file" 2>&1
-        fi
+      echo "===== Create Storage Account ====="
+      echo "Storage Account Name $STORAGE_ACCOUNT_NAME"
+      echo "Location $AZURE_LOCATION"
 
-        rc=$?
-        if [ $rc -ne 0 ]; then
-          echo "HTTPS check failed for $label ($mode), exit $rc"
-          echo "Reason:"
-          grep -Ei 'Could not resolve host|Could not resolve proxy|Connection reset by peer|timed out|SSL|TLS|403|401|404|502|503|504|connection refused|name resolution' "$out_file" | tail -n 10
-          if [ $? -ne 0 ]; then
-            show_tail "$out_file" 60
-          fi
-          rm -f "$out_file"
-          exit $rc
-        fi
+      CREATE_OUTPUT=$(az storage account create \
+        --name "$STORAGE_ACCOUNT_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --location "$AZURE_LOCATION" \
+        --sku Standard_LRS \
+        --kind StorageV2 \
+        --only-show-errors 2>&1)
 
-        echo "HTTPS check $label ($mode) succeeded"
-        show_tail "$out_file" 20
-        rm -f "$out_file"
-      }
+      CREATE_CODE=$?
 
-      echo "Runner: $CI_RUNNER_DESCRIPTION"
-      echo "Server host: $CI_SERVER_HOST"
-      echo "Project path: $CI_PROJECT_PATH"
-      echo "App host: $APP_HOST"
-      echo "SCM host: $SCM_HOST"
+      if [ $CREATE_CODE -ne 0 ]; then
+        echo "Storage account creation failed"
+        echo "Reason:"
+        echo "$CREATE_OUTPUT" | tail -n 40
+        exit $CREATE_CODE
+      fi
 
-      echo "Proxy env BEFORE update:"
-      env | grep -iE '^(http|https|no)_proxy=' || echo "No proxy vars present"
+      echo "Storage account created successfully"
 
-      export NO_PROXY="$NO_PROXY,$APP_HOST,$SCM_HOST,$CI_SERVER_HOST"
-      export no_proxy="$NO_PROXY"
+      echo "===== Verify Storage Account ====="
+      run_step "Verify storage account" \
+        az storage account show \
+        --name "$STORAGE_ACCOUNT_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --query "{name:name,location:location,provisioningState:provisioningState}" \
+        -o table
 
-      echo "Proxy env AFTER update:"
-      env | grep -iE '^(http|https|no)_proxy='
-
-      run_step "Azure login" az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
-      run_step "Set subscription" az account set --subscription "$AZURE_SUBSCRIPTION_ID"
-
-      echo "Azure account context:"
-      az account show --query "{subscription:id,tenantId:tenantId,user:user.name}" -o yaml
-
-      dns_check "APP" "$APP_HOST"
-      dns_check "SCM" "$SCM_HOST"
-
-      url_check "APP" "https://$APP_HOST" "proxy"
-      url_check "SCM" "https://$SCM_HOST" "proxy"
-
-      echo "Validation stage passed successfully"
+      echo "Validation completed successfully"
