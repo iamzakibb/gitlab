@@ -1,0 +1,91 @@
+stages:
+  - validate
+
+validate_storage_access:
+  stage: validate
+  tags:
+    - docker
+  image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
+
+  variables:
+    GIT_STRATEGY: "none"
+    STORAGE_ACCOUNT_NAME: "stgdrivingpooicydev12345"   # hardcoded (must be globally unique)
+    AZURE_LOCATION : ""
+  script:
+    - |
+      set +e
+
+      run_step() {
+        name="$1"
+        shift
+        out_file="$(mktemp)"
+        echo "===== $name ====="
+        "$@" >"$out_file" 2>&1
+        rc=$?
+
+        if [ $rc -ne 0 ]; then
+          echo "$name failed (exit $rc)"
+          echo "Error details:"
+          tail -n 40 "$out_file"
+          rm -f "$out_file"
+          exit $rc
+        fi
+
+        echo "$name succeeded"
+        tail -n 20 "$out_file"
+        rm -f "$out_file"
+      }
+
+      echo "Runner $CI_RUNNER_DESCRIPTION"
+
+      echo "===== Azure Login ====="
+      run_step "Azure login" \
+        az login --service-principal \
+        -u "$AZURE_CLIENT_ID" \
+        -p "$AZURE_CLIENT_SECRET" \
+        --tenant "$AZURE_TENANT_ID" \
+        --only-show-errors -o none
+
+      echo "===== Set Subscription ====="
+      run_step "Set subscription" \
+        az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+
+      echo "===== Azure Context ====="
+      az account show --query "{subscription:id,tenant:tenantId,user:user.name}" -o table
+
+      echo "===== Validate Resource Group ====="
+      run_step "Check resource group" \
+        az group show --name "$AZURE_RESOURCE_GROUP"
+
+      echo "===== Create Storage Account ====="
+      echo "Storage Account Name $STORAGE_ACCOUNT_NAME"
+      echo "Location $AZURE_LOCATION"
+
+      CREATE_OUTPUT=$(az storage account create \
+        --name "$STORAGE_ACCOUNT_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --location "$AZURE_LOCATION" \
+        --sku Standard_LRS \
+        --kind StorageV2 \
+        --only-show-errors 2>&1)
+
+      CREATE_CODE=$?
+
+      if [ $CREATE_CODE -ne 0 ]; then
+        echo "Storage account creation failed"
+        echo "Reason:"
+        echo "$CREATE_OUTPUT" | tail -n 40
+        exit $CREATE_CODE
+      fi
+
+      echo "Storage account created successfully"
+
+      echo "===== Verify Storage Account ====="
+      run_step "Verify storage account" \
+        az storage account show \
+        --name "$STORAGE_ACCOUNT_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --query "{name:name,location:location,provisioningState:provisioningState}" \
+        -o table
+
+      echo "Validation completed successfully"
