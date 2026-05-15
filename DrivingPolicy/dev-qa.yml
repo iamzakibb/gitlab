@@ -1,0 +1,146 @@
+stages:
+  - validate
+  - fetch
+  - build
+  - package
+  - upload
+  - deploy_dev
+  - deploy_qa
+
+default:
+  tags:
+    - docker
+  image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
+
+variables:
+  GIT_STRATEGY: "none"
+  DOTNET_CONFIGURATION: "Release"
+  DOTNET_PROJECT_PATH: "src/DrivingPolicy/DrivingPolicy.csproj"
+  PUBLISH_DIR: "publish"
+  STORAGE_ACCOUNT_NAME: "stgdrivingpooicydev12345"
+  STORAGE_CONTAINER_NAME: "drivingpolicyct"
+  AZURE_WEBAPP_NAME_DEV: "your-webapp-name-dev"
+  AZURE_WEBAPP_NAME_QA: "your-webapp-name-qa"
+
+validate_azure_access:
+  stage: validate
+  script:
+    - set -euo pipefail
+    - echo "Runner  $CI_RUNNER_DESCRIPTION"
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - az account show --query "{subscription:id,tenantId:tenantId,user:user.name}" -o yaml
+    - az group show --name "$AZURE_RESOURCE_GROUP"
+    - az storage account show --name "$STORAGE_ACCOUNT_NAME" --resource-group "$AZURE_RESOURCE_GROUP"
+
+fetch_repo:
+  stage: fetch
+  needs:
+    - job: validate_azure_access
+  script:
+    - set -euo pipefail
+    - echo "Downloading repo via PAT"
+    - 'curl --fail --retry 3 --retry-delay 5 --header "PRIVATE-TOKEN: $CI_PAT_TOKEN" -L "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.tar.gz?sha=${CI_COMMIT_SHA}" -o repo.tar.gz'
+    - mkdir repo
+    - tar -xzf repo.tar.gz -C repo --strip-components=1
+    - test -f "repo/${DOTNET_PROJECT_PATH}"
+  artifacts:
+    paths:
+      - repo/
+    expire_in: 1h
+
+build_app:
+  stage: build
+  needs:
+    - job: validate_azure_access
+    - job: fetch_repo
+      artifacts: true
+  script:
+    - set -euo pipefail
+    - echo "Installing dotnet if needed"
+    - 'if ! command -v dotnet >/dev/null 2>&1; then curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet || (echo "Install script failed, trying tarball fallback" && curl -L https://dotnetcli.azureedge.net/dotnet/Sdk/8.0.100/dotnet-sdk-8.0.100-linux-x64.tar.gz -o dotnet.tar.gz && mkdir -p $HOME/.dotnet && tar -zxf dotnet.tar.gz -C $HOME/.dotnet); fi'
+    - export PATH="$HOME/.dotnet:$PATH"
+    - dotnet --version
+    - cd repo
+    - dotnet restore "$DOTNET_PROJECT_PATH"
+    - dotnet build "$DOTNET_PROJECT_PATH" --configuration "$DOTNET_CONFIGURATION" --no-restore
+    - dotnet publish "$DOTNET_PROJECT_PATH" -c "$DOTNET_CONFIGURATION" -o "../$PUBLISH_DIR"
+  artifacts:
+    paths:
+      - publish/
+    expire_in: 1h
+
+package_zip:
+  stage: package
+  needs:
+    - job: validate_azure_access
+    - job: build_app
+      artifacts: true
+  script:
+    - set -euo pipefail
+    - PACKAGE_NAME="app_publish_${CI_COMMIT_SHORT_SHA}_${CI_PIPELINE_IID}.zip"
+    - cd "$PUBLISH_DIR"
+    - |
+      if command -v zip >/dev/null 2>&1; then
+        zip -r "../$PACKAGE_NAME" .
+      else
+        echo "zip not found, creating zip with python"
+        PYTHON_BIN="$(command -v python3 || command -v python || true)"
+        test -n "$PYTHON_BIN" || PYTHON_BIN=/opt/venv/bin/python
+        "$PYTHON_BIN" -c "import os, zipfile; archive = zipfile.ZipFile('../$PACKAGE_NAME', 'w', zipfile.ZIP_DEFLATED); [archive.write(os.path.join(root, file_name), os.path.relpath(os.path.join(root, file_name), '.')) for root, _, files in os.walk('.') for file_name in files]; archive.close()"
+      fi
+    - cd ..
+    - test -f "$PACKAGE_NAME"
+  artifacts:
+    paths:
+      - app_publish_*.zip
+    expire_in: 1h
+
+upload_to_storage:
+  stage: upload
+  needs:
+    - job: validate_azure_access
+    - job: package_zip
+      artifacts: true
+  script:
+    - set -euo pipefail
+    - PACKAGE_NAME="app_publish_${CI_COMMIT_SHORT_SHA}_${CI_PIPELINE_IID}.zip"
+    - BLOB_NAME="$PACKAGE_NAME"
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - |
+      if [ "$(az storage container exists --account-name "$STORAGE_ACCOUNT_NAME" --name "$STORAGE_CONTAINER_NAME" --auth-mode login --query exists -o tsv)" != "true" ]; then
+        az storage container create --account-name "$STORAGE_ACCOUNT_NAME" --name "$STORAGE_CONTAINER_NAME" --auth-mode login --only-show-errors
+      fi
+    - az storage blob upload --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$BLOB_NAME" --file "$PACKAGE_NAME" --auth-mode login --overwrite true --content-type application/zip
+    - az storage blob url --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$BLOB_NAME" -o tsv
+
+deploy_dev:
+  stage: deploy_dev
+  needs:
+    - job: validate_azure_access
+    - job: upload_to_storage
+  script:
+    - set -euo pipefail
+    - PACKAGE_NAME="app_publish_${CI_COMMIT_SHORT_SHA}_${CI_PIPELINE_IID}.zip"
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - BLOB_URL=$(az storage blob url --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$PACKAGE_NAME" -o tsv)
+    - SAS_TOKEN=$(az storage blob generate-sas --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$PACKAGE_NAME" --permissions r --expiry "$(date -u -d '+1 day' '+%Y-%m-%dT%H:%MZ')" --https-only --auth-mode login --as-user -o tsv)
+    - SRC_URL="${BLOB_URL}?${SAS_TOKEN}"
+    - az webapp deploy --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME_DEV" --src-url "$SRC_URL" --type zip
+
+deploy_qa:
+  stage: deploy_qa
+  needs:
+    - job: validate_azure_access
+    - job: deploy_dev
+  script:
+    - set -euo pipefail
+    - PACKAGE_NAME="app_publish_${CI_COMMIT_SHORT_SHA}_${CI_PIPELINE_IID}.zip"
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - BLOB_URL=$(az storage blob url --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$PACKAGE_NAME" -o tsv)
+    - SAS_TOKEN=$(az storage blob generate-sas --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$PACKAGE_NAME" --permissions r --expiry "$(date -u -d '+1 day' '+%Y-%m-%dT%H:%MZ')" --https-only --auth-mode login --as-user -o tsv)
+    - SRC_URL="${BLOB_URL}?${SAS_TOKEN}"
+    - az webapp deploy --resource-group "$QA_AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME_QA" --src-url "$SRC_URL" --type zip
