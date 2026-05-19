@@ -9,7 +9,7 @@ validate_storage_access:
 
   variables:
     GIT_STRATEGY: "none"
-    STORAGE_ACCOUNT_NAME: "stgdrivingpooicydev12345"   # hardcoded (must be globally unique)
+    STORAGE_ACCOUNT_NAME: "stgdrivingpooicyqa12345"   # hardcoded (must be globally unique)
     AZURE_LOCATION : ""
   script:
     - |
@@ -41,8 +41,8 @@ validate_storage_access:
       echo "===== Azure Login ====="
       run_step "Azure login" \
         az login --service-principal \
-        -u "$AZURE_CLIENT_ID" \
-        -p "$AZURE_CLIENT_SECRET" \
+        -u "$QA_AZURE_CLIENT_ID" \
+        -p "$QA_AZURE_CLIENT_SECRET" \
         --tenant "$AZURE_TENANT_ID" \
         --only-show-errors -o none
 
@@ -55,7 +55,7 @@ validate_storage_access:
 
       echo "===== Validate Resource Group ====="
       run_step "Check resource group" \
-        az group show --name "$AZURE_RESOURCE_GROUP"
+        az group show --name "$QA_AZURE_RESOURCE_GROUP"
 
       echo "===== Create Storage Account ====="
       echo "Storage Account Name $STORAGE_ACCOUNT_NAME"
@@ -63,7 +63,7 @@ validate_storage_access:
 
       CREATE_OUTPUT=$(az storage account create \
         --name "$STORAGE_ACCOUNT_NAME" \
-        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --resource-group "$QA_AZURE_RESOURCE_GROUP" \
         --location "$AZURE_LOCATION" \
         --sku Standard_LRS \
         --kind StorageV2 \
@@ -84,7 +84,7 @@ validate_storage_access:
       run_step "Verify storage account" \
         az storage account show \
         --name "$STORAGE_ACCOUNT_NAME" \
-        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --resource-group "$QA_AZURE_RESOURCE_GROUP" \
         --query "{name:name,location:location,provisioningState:provisioningState}" \
         -o table
 
