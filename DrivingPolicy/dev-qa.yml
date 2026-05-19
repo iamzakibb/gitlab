@@ -138,7 +138,7 @@ deploy_qa:
   script:
     - set -euo pipefail
     - PACKAGE_NAME="app_publish_${CI_COMMIT_SHORT_SHA}_${CI_PIPELINE_IID}.zip"
-    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
+    - az login --service-principal -u "$QA_AZURE_CLIENT_ID" -p "$QA_AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
     - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
     - BLOB_URL=$(az storage blob url --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$PACKAGE_NAME" -o tsv)
     - SAS_TOKEN=$(az storage blob generate-sas --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$PACKAGE_NAME" --permissions r --expiry "$(date -u -d '+1 day' '+%Y-%m-%dT%H:%MZ')" --https-only --auth-mode login --as-user -o tsv)
