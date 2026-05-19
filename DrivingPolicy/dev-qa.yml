@@ -4,6 +4,7 @@ stages:
   - build
   - package
   - upload
+  - upload_qa
   - deploy_dev
   - deploy_qa
 
@@ -19,6 +20,8 @@ variables:
   PUBLISH_DIR: "publish"
   STORAGE_ACCOUNT_NAME: "stgdrivingpooicydev12345"
   STORAGE_CONTAINER_NAME: "drivingpolicyct"
+  STORAGE_ACCOUNT_NAME_QA: "stgdrivingpooicyqa12345"
+  STORAGE_CONTAINER_NAME_QA: "drivingpolicyctqa"
   AZURE_WEBAPP_NAME_DEV: "your-webapp-name-dev"
   AZURE_WEBAPP_NAME_QA: "your-webapp-name-qa"
 
@@ -115,6 +118,25 @@ upload_to_storage:
     - az storage blob upload --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$BLOB_NAME" --file "$PACKAGE_NAME" --auth-mode login --overwrite true --content-type application/zip
     - az storage blob url --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$BLOB_NAME" -o tsv
 
+upload_to_storageqa:
+  stage: upload_qa
+  needs:
+    - job: validate_azure_access
+    - job: package_zip
+      artifacts: true
+  script:
+    - set -euo pipefail
+    - PACKAGE_NAME="app_publish_${CI_COMMIT_SHORT_SHA}_${CI_PIPELINE_IID}.zip"
+    - BLOB_NAME="$PACKAGE_NAME"
+    - az login --service-principal -u "$QA_AZURE_CLIENT_ID" -p "$QA_AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+    - |
+      if [ "$(az storage container exists --account-name "$STORAGE_ACCOUNT_NAME_QA" --name "$STORAGE_CONTAINER_NAME_QA" --auth-mode login --query exists -o tsv)" != "true" ]; then
+        az storage container create --account-name "$STORAGE_ACCOUNT_NAME_QA" --name "$STORAGE_CONTAINER_NAME_QA" --auth-mode login --only-show-errors
+      fi
+    - az storage blob upload --account-name "$STORAGE_ACCOUNT_NAME_QA" --container-name "$STORAGE_CONTAINER_NAME_QA" --name "$BLOB_NAME" --file "$PACKAGE_NAME" --auth-mode login --overwrite true --content-type application/zip
+    - az storage blob url --account-name "$STORAGE_ACCOUNT_NAME_QA" --container-name "$STORAGE_CONTAINER_NAME_QA" --name "$BLOB_NAME" -o tsv
+
 deploy_dev:
   stage: deploy_dev
   needs:
@@ -140,7 +162,7 @@ deploy_qa:
     - PACKAGE_NAME="app_publish_${CI_COMMIT_SHORT_SHA}_${CI_PIPELINE_IID}.zip"
     - az login --service-principal -u "$QA_AZURE_CLIENT_ID" -p "$QA_AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
     - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
-    - BLOB_URL=$(az storage blob url --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$PACKAGE_NAME" -o tsv)
-    - SAS_TOKEN=$(az storage blob generate-sas --account-name "$STORAGE_ACCOUNT_NAME" --container-name "$STORAGE_CONTAINER_NAME" --name "$PACKAGE_NAME" --permissions r --expiry "$(date -u -d '+1 day' '+%Y-%m-%dT%H:%MZ')" --https-only --auth-mode login --as-user -o tsv)
+    - BLOB_URL=$(az storage blob url --account-name "$STORAGE_ACCOUNT_NAME_QA" --container-name "$STORAGE_CONTAINER_NAME_QA" --name "$PACKAGE_NAME" -o tsv)
+    - SAS_TOKEN=$(az storage blob generate-sas --account-name "$STORAGE_ACCOUNT_NAME_QA" --container-name "$STORAGE_CONTAINER_NAME_QA" --name "$PACKAGE_NAME" --permissions r --expiry "$(date -u -d '+1 day' '+%Y-%m-%dT%H:%MZ')" --https-only --auth-mode login --as-user -o tsv)
     - SRC_URL="${BLOB_URL}?${SAS_TOKEN}"
     - az webapp deploy --resource-group "$QA_AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME_QA" --src-url "$SRC_URL" --type zip
