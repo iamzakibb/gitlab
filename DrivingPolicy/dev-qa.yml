@@ -7,6 +7,8 @@ stages:
   - upload_qa
   - deploy_dev
   - deploy_qa
+  - tag
+  - release
 
 default:
   tags:
