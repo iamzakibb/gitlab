@@ -178,7 +178,7 @@ create_tag:
     - git tag $TAG_NAME
     - git push https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git $TAG_NAME
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "malindaBranch"'
 
 release:
   stage: release
