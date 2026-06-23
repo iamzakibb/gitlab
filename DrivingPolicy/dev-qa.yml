@@ -170,13 +170,35 @@ deploy_qa:
     - az webapp deploy --resource-group "$QA_AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME_QA" --src-url "$SRC_URL" --type zip
 create_tag:
   stage: tag
-  before_script:
-    - git config --global user.email "gitlab@example.com"
-    - git config --global user.name "GitLab CI"
   script:
-    - TAG_NAME="v1.${CI_PIPELINE_ID}"
-    - git tag $TAG_NAME
-    - git push https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git $TAG_NAME
+    - |
+      set -euo pipefail
+
+      test -n "${CI_PAT_TOKEN:-}" || (echo "CI_PAT_TOKEN is required to create tags" && exit 1)
+
+      TAG_NAME="v1.${CI_PIPELINE_ID}"
+      echo "Creating tag ${TAG_NAME} for ${CI_COMMIT_SHA}"
+
+      HTTP_CODE=$(curl \
+        --silent \
+        --show-error \
+        --output response.json \
+        --write-out "%{http_code}" \
+        --request POST \
+        --header "PRIVATE-TOKEN: ${CI_PAT_TOKEN}" \
+        --header "Content-Type: application/json" \
+        --data "{\"tag_name\":\"${TAG_NAME}\",\"ref\":\"${CI_COMMIT_SHA}\",\"message\":\"Release ${TAG_NAME}\"}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/tags")
+
+      cat response.json
+
+      if [ "${HTTP_CODE}" != "201" ]; then
+        echo "Tag creation failed"
+        echo "HTTP Status: ${HTTP_CODE}"
+        exit 1
+      fi
+
+      echo "Tag created successfully"
   rules:
     - if: '$CI_COMMIT_BRANCH == "malindaBranch"'
 
