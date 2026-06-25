@@ -1,0 +1,150 @@
+stages:
+  - validate
+  - fetch
+  - build
+  - deploy
+
+default:
+  tags:
+    - docker
+  image: "codebank.nexus.cloud.frb.org/cicd-executor-ps-az:2"
+
+variables:
+  GIT_STRATEGY: "none"
+
+  DOTNET_CONFIGURATION: "Release"
+  SOLUTION_FILE: "**/*.sln"
+
+  RESOURCE_GROUP: "mac-ln-rg-atlbankparking-qa"
+  LOCATION: "East US"
+
+  TEMPLATE_FILE: "BankParkingLA.json"
+  PARAMETERS_FILE: "BankParkingLA.parameters.DEV.json"
+
+validate_azure:
+  stage: validate
+
+  script:
+    - set -euo pipefail
+
+    - echo "Runner $CI_RUNNER_DESCRIPTION"
+
+    - az login \
+        --service-principal \
+        -u "$AZURE_CLIENT_ID" \
+        -p "$AZURE_CLIENT_SECRET" \
+        --tenant "$AZURE_TENANT_ID" \
+        --only-show-errors \
+        -o none
+
+    - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+
+    - az account show
+
+    - az group show \
+        --name "$RESOURCE_GROUP"
+
+fetch_repo:
+  stage: fetch
+
+  needs:
+    - validate_azure
+
+  script:
+    - set -euo pipefail
+
+    - echo "Downloading repository"
+
+    - >
+      curl
+      --fail
+      --retry 3
+      --retry-delay 5
+      --header "PRIVATE-TOKEN: ${CI_PAT_TOKEN}"
+      -L
+      "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.tar.gz?sha=${CI_COMMIT_SHA}"
+      -o repo.tar.gz
+
+    - mkdir repo
+
+    - tar -xzf repo.tar.gz -C repo --strip-components=1
+
+    - ls -R repo | head -100
+
+  artifacts:
+    paths:
+      - repo
+
+build_solution:
+  stage: build
+
+  needs:
+    - fetch_repo
+
+  script:
+    - set -euo pipefail
+
+    - |
+      if ! command -v dotnet >/dev/null 2>&1; then
+        curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+        chmod +x dotnet-install.sh
+        ./dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet
+      fi
+
+    - export PATH="$HOME/.dotnet:$PATH"
+
+    - dotnet --version
+
+    - cd repo
+
+    - dotnet restore
+
+    - dotnet build \
+        --configuration "$DOTNET_CONFIGURATION" \
+        --no-restore
+
+  artifacts:
+    paths:
+      - repo
+
+deploy_logic_app:
+  stage: deploy
+
+  needs:
+    - build_solution
+
+  script:
+    - set -euo pipefail
+
+    - az login \
+        --service-principal \
+        -u "$AZURE_CLIENT_ID" \
+        -p "$AZURE_CLIENT_SECRET" \
+        --tenant "$AZURE_TENANT_ID" \
+        --only-show-errors \
+        -o none
+
+    - az account set \
+        --subscription "$AZURE_SUBSCRIPTION_ID"
+
+    - cd repo
+
+    - echo "Searching for ARM template..."
+
+    - TEMPLATE=$(find . -name "$TEMPLATE_FILE" | head -1)
+
+    - PARAMS=$(find . -name "$PARAMETERS_FILE" | head -1)
+
+    - test -f "$TEMPLATE"
+
+    - test -f "$PARAMS"
+
+    - echo "Template $TEMPLATE"
+
+    - echo "Parameters $PARAMS"
+
+    - |
+      az deployment group create \
+        --resource-group "$RESOURCE_GROUP" \
+        --template-file "$TEMPLATE" \
+        --parameters @"$PARAMS"
