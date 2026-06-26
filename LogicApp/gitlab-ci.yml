@@ -33,13 +33,7 @@ validate_azure:
     - echo "AZURE_TENANT_ID length ${#AZURE_TENANT_ID}"
     - echo "AZURE_SUBSCRIPTION_ID length ${#AZURE_SUBSCRIPTION_ID}"
 
-    - az login \
-        --service-principal \
-        -u "$AZURE_CLIENT_ID" \
-        -p "$AZURE_CLIENT_SECRET" \
-        --tenant "$AZURE_TENANT_ID" \
-        --only-show-errors \
-        -o none
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
 
     - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
 
