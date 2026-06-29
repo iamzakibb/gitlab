@@ -71,43 +71,10 @@ fetch_repo:
     paths:
       - repo
 
-build_solution:
-  stage: build
-
-  needs:
-    - fetch_repo
-
-  script:
-    - set -euo pipefail
-
-    - |
-      if ! command -v dotnet >/dev/null 2>&1; then
-        curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-        chmod +x dotnet-install.sh
-        ./dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet
-      fi
-
-    - export PATH="$HOME/.dotnet:$PATH"
-
-    - dotnet --version
-
-    - cd repo
-
-    - dotnet restore
-
-    - dotnet build \
-        --configuration "$DOTNET_CONFIGURATION" \
-        --no-restore
-
-  artifacts:
-    paths:
-      - repo
 
 deploy_logic_app:
   stage: deploy
 
-  needs:
-    - build_solution
 
   script:
     - set -euo pipefail
