@@ -39,8 +39,6 @@ validate_azure:
 
     - az account show
 
-    - az group show \
-        --name "$RESOURCE_GROUP"
 
 fetch_repo:
   stage: fetch
