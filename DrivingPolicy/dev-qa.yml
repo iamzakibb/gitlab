@@ -174,8 +174,6 @@ create_tag:
     - |
       set -euo pipefail
 
-      test -n "${CI_PAT_TOKEN:-}" || (echo "CI_PAT_TOKEN is required to create tags" && exit 1)
-
       TAG_NAME="v1.${CI_PIPELINE_ID}"
       echo "Creating tag ${TAG_NAME} for ${CI_COMMIT_SHA}"
 
@@ -185,7 +183,7 @@ create_tag:
         --output response.json \
         --write-out "%{http_code}" \
         --request POST \
-        --header "PRIVATE-TOKEN: ${CI_PAT_TOKEN}" \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
         --header "Content-Type: application/json" \
         --data "{\"tag_name\":\"${TAG_NAME}\",\"ref\":\"${CI_COMMIT_SHA}\",\"message\":\"Release ${TAG_NAME}\"}" \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/tags")
@@ -198,26 +196,36 @@ create_tag:
         exit 1
       fi
 
+      echo "RELEASE_TAG_NAME=${TAG_NAME}" > release.env
       echo "Tag created successfully"
+  artifacts:
+    reports:
+      dotenv: release.env
   rules:
     - if: '$CI_COMMIT_BRANCH == "malindaBranch"'
 
 release:
   stage: release
+  needs:
+    - job: create_tag
+      artifacts: true
   script:
     - |
       set -euo pipefail
 
-      echo "Creating release for ${CI_COMMIT_TAG}"
+      test -n "${RELEASE_TAG_NAME:-}" || (echo "RELEASE_TAG_NAME was not provided by create_tag" && exit 1)
+
+      echo "Creating release for ${RELEASE_TAG_NAME}"
 
       HTTP_CODE=$(curl \
         --silent \
         --show-error \
         --output response.json \
         --write-out "%{http_code}" \
+        --request POST \
         --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
         --header "Content-Type: application/json" \
-        --data "{\"name\":\"${CI_COMMIT_TAG}\",\"tag_name\":\"${CI_COMMIT_TAG}\",\"description\":\"Release ${CI_COMMIT_TAG}\"}" \
+        --data "{\"name\":\"${RELEASE_TAG_NAME}\",\"tag_name\":\"${RELEASE_TAG_NAME}\",\"description\":\"Release ${RELEASE_TAG_NAME}\"}" \
         "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases")
 
       cat response.json
@@ -229,4 +237,4 @@ release:
 
       echo "Release created successfully"
   rules:
-    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH == "malindaBranch"'
