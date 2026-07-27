@@ -18,8 +18,8 @@ variables:
   RESOURCE_GROUP: "mac-n-np-rg-dev-dash"
   LOCATION: "East US"
 
-  TEMPLATE_FILE: "GoogleAnalytics.json"
-  PARAMETERS_FILE: "GoogleAnalytics.parameters.DEV.json"
+  TEMPLATE_FILE: "GoogleAnalyticsV4.json"
+  PARAMETERS_FILE: "GoogleAnalyticsV4.parameters.DEV.json"
 
   # QA_RESOURCE_GROUP: "mac-ln-rg-atlbankparking-qa"
   # QA_LOCATION: "East US"
