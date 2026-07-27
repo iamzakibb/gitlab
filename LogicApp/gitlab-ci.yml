@@ -2,7 +2,7 @@ stages:
   - validate
   - fetch
   - deploy
-  - deploy_qa
+  # - deploy_qa
 
 default:
   tags:
@@ -15,16 +15,16 @@ variables:
   DOTNET_CONFIGURATION: "Release"
   SOLUTION_FILE: "**/*.sln"
 
-  RESOURCE_GROUP: "mac-ln-rg-atlbankparking-qa"
+  RESOURCE_GROUP: "mac-n-np-rg-dev-dash"
   LOCATION: "East US"
 
-  TEMPLATE_FILE: "BankParkingLA.json"
-  PARAMETERS_FILE: "BankParkingLA.parameters.DEV.json"
+  TEMPLATE_FILE: "GoogleAnalytics.json"
+  PARAMETERS_FILE: "GoogleAnalytics.parameters.DEV.json"
 
-  QA_RESOURCE_GROUP: "mac-ln-rg-atlbankparking-qa"
-  QA_LOCATION: "East US"
-  QA_TEMPLATE_FILE: "BankParkingLA.json"
-  QA_PARAMETERS_FILE: "BankParkingLA.parameters.QA.json"
+  # QA_RESOURCE_GROUP: "mac-ln-rg-atlbankparking-qa"
+  # QA_LOCATION: "East US"
+  # QA_TEMPLATE_FILE: "BankParkingLA.json"
+  # QA_PARAMETERS_FILE: "BankParkingLA.parameters.QA.json"
 
 validate_azure:
   stage: validate
@@ -110,35 +110,35 @@ deploy_logic_app:
         --template-file "$TEMPLATE" \
         --parameters @"$PARAMS"
 
-deploy_qa:
-  stage: deploy_qa
+# deploy_qa:
+#   stage: deploy_qa
 
 
-  script:
-    - set -euo pipefail
+#   script:
+#     - set -euo pipefail
 
-    - az login --service-principal -u "$QA_AZURE_CLIENT_ID" -p "$QA_AZURE_CLIENT_SECRET" --tenant "$QA_AZURE_TENANT_ID" --only-show-errors -o none
+#     - az login --service-principal -u "$QA_AZURE_CLIENT_ID" -p "$QA_AZURE_CLIENT_SECRET" --tenant "$QA_AZURE_TENANT_ID" --only-show-errors -o none
 
-    - az account set --subscription "$QA_AZURE_SUBSCRIPTION_ID"
+#     - az account set --subscription "$QA_AZURE_SUBSCRIPTION_ID"
 
-    - cd repo
+#     - cd repo
 
-    - echo "Searching for ARM template..."
+#     - echo "Searching for ARM template..."
 
-    - TEMPLATE=$(find . -name "$QA_TEMPLATE_FILE" | head -1)
+#     - TEMPLATE=$(find . -name "$QA_TEMPLATE_FILE" | head -1)
 
-    - PARAMS=$(find . -name "$QA_PARAMETERS_FILE" | head -1)
+#     - PARAMS=$(find . -name "$QA_PARAMETERS_FILE" | head -1)
 
-    - test -f "$TEMPLATE"
+#     - test -f "$TEMPLATE"
 
-    - test -f "$PARAMS"
+#     - test -f "$PARAMS"
 
-    - echo "Template $TEMPLATE"
+#     - echo "Template $TEMPLATE"
 
-    - echo "Parameters $PARAMS"
+#     - echo "Parameters $PARAMS"
 
-    - |
-      az deployment group create \
-        --resource-group "$QA_RESOURCE_GROUP" \
-        --template-file "$TEMPLATE" \
-        --parameters @"$PARAMS"
+#     - |
+#       az deployment group create \
+#         --resource-group "$QA_RESOURCE_GROUP" \
+#         --template-file "$TEMPLATE" \
+#         --parameters @"$PARAMS"
