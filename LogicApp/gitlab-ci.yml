@@ -2,7 +2,6 @@ stages:
   - validate
   - fetch
   - deploy
-  # - deploy_qa
 
 default:
   tags:
@@ -12,19 +11,11 @@ default:
 variables:
   GIT_STRATEGY: "none"
 
-  DOTNET_CONFIGURATION: "Release"
-  SOLUTION_FILE: "**/*.sln"
-
   RESOURCE_GROUP: "mac-n-np-rg-dev-dash"
   LOCATION: "East US"
 
-  TEMPLATE_FILE: "GoogleAnalyticsV4.json"
-  PARAMETERS_FILE: "GoogleAnalyticsV4.parameters.DEV.json"
-
-  # QA_RESOURCE_GROUP: "mac-ln-rg-atlbankparking-qa"
-  # QA_LOCATION: "East US"
-  # QA_TEMPLATE_FILE: "BankParkingLA.json"
-  # QA_PARAMETERS_FILE: "BankParkingLA.parameters.QA.json"
+  # Existing Logic App Standard name
+  LOGIC_APP_NAME: "YOUR_LOGIC_APP_NAME"
 
 validate_azure:
   stage: validate
@@ -32,18 +23,25 @@ validate_azure:
   script:
     - set -euo pipefail
 
-    - echo "Runner $CI_RUNNER_DESCRIPTION"
-    - echo "AZURE_CLIENT_ID length ${#AZURE_CLIENT_ID}"
-    - echo "AZURE_CLIENT_SECRET length ${#AZURE_CLIENT_SECRET}"
-    - echo "AZURE_TENANT_ID length ${#AZURE_TENANT_ID}"
-    - echo "AZURE_SUBSCRIPTION_ID length ${#AZURE_SUBSCRIPTION_ID}"
+    - echo "========== Azure Validation =========="
 
-    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
+    - test -n "$AZURE_CLIENT_ID"
+    - test -n "$AZURE_CLIENT_SECRET"
+    - test -n "$AZURE_TENANT_ID"
+    - test -n "$AZURE_SUBSCRIPTION_ID"
+
+    - |
+      az login \
+        --service-principal \
+        --username "$AZURE_CLIENT_ID" \
+        --password "$AZURE_CLIENT_SECRET" \
+        --tenant "$AZURE_TENANT_ID" \
+        --only-show-errors \
+        -o none
 
     - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
 
-    - az account show
-
+    - az account show --output table
 
 fetch_repo:
   stage: fetch
@@ -54,91 +52,136 @@ fetch_repo:
   script:
     - set -euo pipefail
 
-    - echo "Downloading repository"
+    - echo "========== Download Repository =========="
 
-    - >
-      curl
-      --fail
-      --retry 3
-      --retry-delay 5
-      --header "PRIVATE-TOKEN: ${CI_PAT_TOKEN}"
-      -L
-      "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.tar.gz?sha=${CI_COMMIT_SHA}"
-      -o repo.tar.gz
+    - |
+      curl \
+        --fail \
+        --retry 3 \
+        --retry-delay 5 \
+        --header "PRIVATE-TOKEN: ${CI_PAT_TOKEN}" \
+        --location \
+        "https://${CI_SERVER_HOST}/api/v4/projects/${CI_PROJECT_ID}/repository/archive.tar.gz?sha=${CI_COMMIT_SHA}" \
+        -o repo.tar.gz
 
     - mkdir repo
 
     - tar -xzf repo.tar.gz -C repo --strip-components=1
 
+    - echo "Repository downloaded."
+
     - ls -R repo | head -100
 
   artifacts:
+    expire_in: 1 hour
     paths:
       - repo
-
 
 deploy_logic_app:
   stage: deploy
 
+  needs:
+    - fetch_repo
 
   script:
     - set -euo pipefail
 
-    - az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors -o none
+    - echo "========== Azure Login =========="
+
+    - |
+      az login \
+        --service-principal \
+        --username "$AZURE_CLIENT_ID" \
+        --password "$AZURE_CLIENT_SECRET" \
+        --tenant "$AZURE_TENANT_ID" \
+        --only-show-errors \
+        -o none
 
     - az account set --subscription "$AZURE_SUBSCRIPTION_ID"
 
     - cd repo
 
-    - echo "Searching for ARM template..."
+    - echo "========== Locate Logic App Standard Project =========="
 
-    - TEMPLATE=$(find . -name "$TEMPLATE_FILE" | head -1)
-
-    - PARAMS=$(find . -name "$PARAMETERS_FILE" | head -1)
-
-    - test -f "$TEMPLATE"
-
-    - test -f "$PARAMS"
-
-    - echo "Template $TEMPLATE"
-
-    - echo "Parameters $PARAMS"
+    - PROJECT_DIR=$(find . -name host.json -exec dirname {} \; | head -1)
 
     - |
-      az deployment group create \
+      if [ -z "$PROJECT_DIR" ]; then
+        echo "ERROR: Could not locate Logic App Standard project (host.json not found)."
+        exit 1
+      fi
+
+    - 'echo "Project directory: $PROJECT_DIR"'
+
+    - cd "$PROJECT_DIR"
+
+    - test -f host.json
+
+    - echo "========== Packaging Logic App =========="
+
+    - PACKAGE_NAME="logicapp_${CI_COMMIT_SHORT_SHA}_${CI_PIPELINE_IID}.zip"
+
+    - |
+      if command -v zip >/dev/null 2>&1; then
+        echo "Using native zip..."
+
+        zip -r "../$PACKAGE_NAME" . \
+          -x "*.git*" \
+          -x ".git/*" \
+          -x ".vs/*" \
+          -x "bin/*" \
+          -x "obj/*"
+
+      else
+        echo "zip not found, creating zip using Python"
+
+        PYTHON_BIN="$(command -v python3 || command -v python || true)"
+
+        test -n "$PYTHON_BIN" || PYTHON_BIN=/opt/venv/bin/python
+
+        "$PYTHON_BIN" <<EOF
+        import os
+        import zipfile
+
+        archive = zipfile.ZipFile("../${PACKAGE_NAME}", "w", zipfile.ZIP_DEFLATED)
+
+        exclude = {".git", ".vs", "bin", "obj"}
+
+        for root, dirs, files in os.walk("."):
+            dirs[:] = [d for d in dirs if d not in exclude]
+
+            for file in files:
+                full = os.path.join(root, file)
+                archive.write(full, os.path.relpath(full, "."))
+
+        archive.close()
+        EOF
+
+      fi
+
+    - cd ..
+
+    - test -f "$PACKAGE_NAME"
+
+    - ls -lh "$PACKAGE_NAME"
+
+    - echo "========== Verify Logic App =========="
+
+    - |
+      az webapp show \
         --resource-group "$RESOURCE_GROUP" \
-        --template-file "$TEMPLATE" \
-        --parameters @"$PARAMS"
+        --name "$LOGIC_APP_NAME" \
+        --output table
 
-# deploy_qa:
-#   stage: deploy_qa
+    - echo "========== Deploy Logic App =========="
 
+    - |
+      az webapp deploy \
+        --resource-group "$RESOURCE_GROUP" \
+        --name "$LOGIC_APP_NAME" \
+        --src-path "$PACKAGE_NAME" \
+        --type zip
 
-#   script:
-#     - set -euo pipefail
+    - echo "========== Deployment Complete =========="
 
-#     - az login --service-principal -u "$QA_AZURE_CLIENT_ID" -p "$QA_AZURE_CLIENT_SECRET" --tenant "$QA_AZURE_TENANT_ID" --only-show-errors -o none
-
-#     - az account set --subscription "$QA_AZURE_SUBSCRIPTION_ID"
-
-#     - cd repo
-
-#     - echo "Searching for ARM template..."
-
-#     - TEMPLATE=$(find . -name "$QA_TEMPLATE_FILE" | head -1)
-
-#     - PARAMS=$(find . -name "$QA_PARAMETERS_FILE" | head -1)
-
-#     - test -f "$TEMPLATE"
-
-#     - test -f "$PARAMS"
-
-#     - echo "Template $TEMPLATE"
-
-#     - echo "Parameters $PARAMS"
-
-#     - |
-#       az deployment group create \
-#         --resource-group "$QA_RESOURCE_GROUP" \
-#         --template-file "$TEMPLATE" \
-#         --parameters @"$PARAMS"
+    - echo "Logic App workflow deployed successfully."
